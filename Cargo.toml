@@ -1,0 +1,15 @@
+[package]
+name = "vulkan_rust"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ash = "0.37"
+winit = "0.27"
+vk-shader-macros = "0.2.8"
+gpu-allocator = "0.18.0"
+#vk-mem = { git = "https://github.com/gwihlidal/vk-mem-rs", version = "0.2.3" }
+nalgebra-glm = "0.17"
+memoffset = "0.6.5"
