@@ -125,7 +125,7 @@ pub struct Renderer {
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
     //vertex_buffer: Buffer,
-    models: Vec<Model<Vertex, InstanceData>>
+    models: Vec<Model<Vertex, InstanceData>>,
 }
 
 impl Renderer {
@@ -152,6 +152,7 @@ impl Renderer {
             ext::DebugUtils::name().as_ptr(),
             khr::Surface::name().as_ptr(),
             khr::XlibSurface::name().as_ptr(),
+            khr::WaylandSurface::name().as_ptr()
         ];
 
         // Create instance
@@ -227,16 +228,25 @@ impl Renderer {
         let device_extension_names = [ash::extensions::khr::Swapchain::name().as_ptr()];
         // create logical device
         let priorities = [1.0f32];
-        let queue_infos = [
-            vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(graphics_queue_index)
-                .queue_priorities(&priorities)
-                .build(),
-            vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(transfer_queue_index)
-                .queue_priorities(&priorities)
-                .build(),
-        ];
+        let queue_infos = if graphics_queue_index != transfer_queue_index {
+            vec![
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(graphics_queue_index)
+                    .queue_priorities(&priorities)
+                    .build(),
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(transfer_queue_index)
+                    .queue_priorities(&priorities)
+                    .build(),
+            ]
+        } else {
+            vec![
+                vk::DeviceQueueCreateInfo::builder()
+                    .queue_family_index(graphics_queue_index)
+                    .queue_priorities(&priorities)
+                    .build()
+            ]
+        };
 
         let device_create_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_infos)
@@ -382,7 +392,12 @@ impl Renderer {
             .collect()
     }
 
-    pub fn new(name: &str, x11_window: u64, x11_display: *mut vk::Display) -> RendererResult<Self> {
+    pub fn new(
+        name: &str,
+        surface: *mut c_void,
+        display: *mut c_void,
+        use_wayland: bool,
+    ) -> RendererResult<Self> {
         // Layers
         let layers = unsafe {
             [CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()]
@@ -412,11 +427,19 @@ impl Renderer {
         let utils_messenger =
             unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None)? };
 
-        let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-            .window(x11_window)
-            .dpy(x11_display);
-        let xlib_surface_loader = ash::extensions::khr::XlibSurface::new(&entry, &instance);
-        let surface = unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? };
+        let surface = if use_wayland {
+            let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR::builder()
+                .display(display)
+                .surface(surface);
+            let wayland_surface_loader = ash::extensions::khr::WaylandSurface::new(&entry, &instance);
+            unsafe { wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)? }
+        } else {
+            let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
+                .window(surface as u64)
+                .dpy(display as *mut *const c_void);
+            let xlib_surface_loader = ash::extensions::khr::XlibSurface::new(&entry, &instance);
+            unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? }
+        };
         let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
 
         let (physical_device, _physical_device_properties) = Self::pick_physical_device(&instance)?;
@@ -433,16 +456,15 @@ impl Renderer {
         let graphics_queue = unsafe { device.get_device_queue(graphics_queue_index, 0) };
 
         // Allocator
-        let mut allocator = Allocator::new(
-            &AllocatorCreateDesc {
-                instance: instance.clone(),
-                device: device.clone(),
-                physical_device,
-                debug_settings: Default::default(),
-                buffer_device_address: false,
-            }
-        ).unwrap(); // TODO error handling
-        // let allocator = vk_mem::Allocator::new(allocator_create_info)?;
+        let mut allocator = Allocator::new(&AllocatorCreateDesc {
+            instance: instance.clone(),
+            device: device.clone(),
+            physical_device,
+            debug_settings: Default::default(),
+            buffer_device_address: false,
+        })
+        .unwrap(); // TODO error handling
+                   // let allocator = vk_mem::Allocator::new(allocator_create_info)?;
 
         let swapchain = Swapchain::new(
             &instance,
@@ -533,23 +555,21 @@ impl Renderer {
 
         // vertex_buffer.fill(&allocator, data)?;
 
-        let mut cube = Model::<Vertex, InstanceData> ::cube();
+        let mut cube = Model::<Vertex, InstanceData>::cube();
         cube.insert_visibly(InstanceData {
             model_matrix: na::Mat4::new_scaling(0.1).into(),
             color_mod: [1.0, 0.0, 0.0],
         });
         cube.insert_visibly(InstanceData {
-            model_matrix: (
-                na::Mat4::new_translation(&na::Vec3::new(0.0, 0.25, 0.0))
-                * na::Mat4::new_scaling(0.1)
-            ).into(),
+            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.0, 0.25, 0.0))
+                * na::Mat4::new_scaling(0.1))
+            .into(),
             color_mod: [0.0, 1.0, 0.0],
         });
         cube.insert_visibly(InstanceData {
-            model_matrix: (
-                na::Mat4::new_translation(&na::Vec3::new(0.0, 0.5, 0.0))
-                * na::Mat4::new_scaling(0.1)
-            ).into(),
+            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.0, 0.5, 0.0))
+                * na::Mat4::new_scaling(0.1))
+            .into(),
             color_mod: [0.0, 1.0, 0.0],
         });
         cube.update_vertex_buffer(&device, &mut allocator)?;

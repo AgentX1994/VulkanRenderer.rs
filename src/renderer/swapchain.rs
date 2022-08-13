@@ -16,7 +16,11 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    fn create_image_views(device: &Device, format: &vk::SurfaceFormatKHR, images: &[vk::Image]) -> Vec<vk::ImageView> {
+    fn create_image_views(
+        device: &Device,
+        format: &vk::SurfaceFormatKHR,
+        images: &[vk::Image],
+    ) -> Vec<vk::ImageView> {
         images
             .iter()
             .map(|image| {
@@ -67,17 +71,29 @@ impl Swapchain {
                     && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
             })
             .ok_or(vk::Result::ERROR_FORMAT_NOT_SUPPORTED)?;
-        let extent = surface_capabilities.current_extent;
+        let extent = vk::Extent2D {
+            width: surface_capabilities
+                .current_extent
+                .width
+                .min(surface_capabilities.min_image_extent.width)
+                .max(surface_capabilities.max_image_extent.width),
+            height: surface_capabilities
+                .current_extent
+                .height
+                .min(surface_capabilities.min_image_extent.height)
+                .max(surface_capabilities.max_image_extent.height),
+        };
         let queue_families = [graphics_queue_index];
-        let min_image_count = 3
-            .min(surface_capabilities.min_image_count)
-            .max(surface_capabilities.max_image_count);
+        let min_image_count = 3.min(surface_capabilities.min_image_count).max(
+            if surface_capabilities.max_image_count == 0 {
+                surface_capabilities.min_image_count
+            } else {
+                surface_capabilities.max_image_count
+            },
+        );
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
             .surface(*surface)
-            .min_image_count(
-                3.min(surface_capabilities.min_image_count)
-                    .max(surface_capabilities.max_image_count),
-            )
+            .min_image_count(min_image_count)
             .image_format(format.format)
             .image_color_space(format.color_space)
             .image_extent(extent)

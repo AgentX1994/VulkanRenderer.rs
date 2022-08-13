@@ -1,4 +1,4 @@
-use ash::vk;
+use std::ffi::c_void;
 
 use winit::event::{Event, WindowEvent};
 use winit::platform::unix::WindowExtUnix;
@@ -10,12 +10,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop)?;
 
-    // Create x11 surface
-    // TODO cross platform windowing?
-    let x11_display = window.xlib_display().unwrap();
-    let x11_window = window.xlib_window().unwrap();
+    // Get display and Window
+    let (display, surface, is_wayland) = {
+        if let Some(display) = window.xlib_display() {
+            (
+                display,
+                window.xlib_window().expect("Got X11 Display but no window") as *mut c_void,
+                false
+            )
+        } else if let Some(display) = window.wayland_display() {
+            (
+                display,
+                window.wayland_surface().expect("Got Wayland Display but no surface"),
+                true
+            )
+        } else {
+            panic!("No X11 or Wayland Display available!");
+        }
+    };
 
-    let mut renderer = Renderer::new("My Game Engine", x11_window, x11_display as *mut vk::Display)?;
+    let mut renderer = Renderer::new(
+        "My Game Engine",
+        surface,
+        display,
+        is_wayland
+    )?;
 
     // Run event loop
     let mut running = true;
@@ -37,7 +56,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             // render here
             renderer.render().expect("Could not render frame!");
-            
         }
         _ => {}
     });
