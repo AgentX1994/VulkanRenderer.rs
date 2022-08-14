@@ -1162,6 +1162,7 @@ dependencies = [
  "gpu-allocator",
  "memoffset",
  "nalgebra-glm",
+ "raw-window-handle 0.5.0",
  "vk-shader-macros",
  "winit",
 ]

@@ -1,6 +1,10 @@
+#[cfg(not(target_os = "windows"))]
 use std::ffi::c_void;
 
+use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
 use winit::event::{Event, WindowEvent};
+
+#[cfg(not(target_os = "windows"))]
 use winit::platform::unix::WindowExtUnix;
 
 use vulkan_rust::renderer::Renderer;
@@ -11,30 +15,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window = winit::window::Window::new(&event_loop)?;
 
     // Get display and Window
+    #[cfg(not(target_os = "windows"))]
     let (display, surface, is_wayland) = {
         if let Some(display) = window.xlib_display() {
             (
                 display,
                 window.xlib_window().expect("Got X11 Display but no window") as *mut c_void,
-                false
+                false,
             )
         } else if let Some(display) = window.wayland_display() {
             (
                 display,
-                window.wayland_surface().expect("Got Wayland Display but no surface"),
-                true
+                window
+                    .wayland_surface()
+                    .expect("Got Wayland Display but no surface"),
+                true,
             )
         } else {
             panic!("No X11 or Wayland Display available!");
         }
     };
+    #[cfg(target_os = "windows")]
+    let (display, surface, is_wayland) = {
+        if let RawWindowHandle::Win32(Win32WindowHandle {
+            hwnd, hinstance, ..
+        }) = window.raw_window_handle()
+        {
+            (hinstance, hwnd, false)
+        } else {
+            panic!("Could not setup window");
+        }
+    };
 
-    let mut renderer = Renderer::new(
-        "My Game Engine",
-        surface,
-        display,
-        is_wayland
-    )?;
+    let mut renderer = Renderer::new("My Game Engine", surface, display, is_wayland)?;
 
     // Run event loop
     let mut running = true;

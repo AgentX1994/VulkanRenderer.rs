@@ -151,8 +151,12 @@ impl Renderer {
         let instance_extension_names = [
             ext::DebugUtils::name().as_ptr(),
             khr::Surface::name().as_ptr(),
+            #[cfg(target_os = "windows")]
+            khr::Win32Surface::name().as_ptr(),
+            #[cfg(not(target_os = "windows"))]
             khr::XlibSurface::name().as_ptr(),
-            khr::WaylandSurface::name().as_ptr()
+            #[cfg(not(target_os = "windows"))]
+            khr::WaylandSurface::name().as_ptr(),
         ];
 
         // Create instance
@@ -240,12 +244,10 @@ impl Renderer {
                     .build(),
             ]
         } else {
-            vec![
-                vk::DeviceQueueCreateInfo::builder()
-                    .queue_family_index(graphics_queue_index)
-                    .queue_priorities(&priorities)
-                    .build()
-            ]
+            vec![vk::DeviceQueueCreateInfo::builder()
+                .queue_family_index(graphics_queue_index)
+                .queue_priorities(&priorities)
+                .build()]
         };
 
         let device_create_info = vk::DeviceCreateInfo::builder()
@@ -427,11 +429,13 @@ impl Renderer {
         let utils_messenger =
             unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None)? };
 
+        #[cfg(not(target_os = "windows"))]
         let surface = if use_wayland {
             let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR::builder()
                 .display(display)
                 .surface(surface);
-            let wayland_surface_loader = ash::extensions::khr::WaylandSurface::new(&entry, &instance);
+            let wayland_surface_loader =
+                ash::extensions::khr::WaylandSurface::new(&entry, &instance);
             unsafe { wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)? }
         } else {
             let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
@@ -440,6 +444,15 @@ impl Renderer {
             let xlib_surface_loader = ash::extensions::khr::XlibSurface::new(&entry, &instance);
             unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? }
         };
+        #[cfg(target_os = "windows")]
+        let surface = {
+            let win32_create_info = vk::Win32SurfaceCreateInfoKHR::builder()
+                .hinstance(display)
+                .hwnd(surface);
+            let win32_surface_loader = ash::extensions::khr::Win32Surface::new(&entry, &instance);
+            unsafe { win32_surface_loader.create_win32_surface(&win32_create_info, None)? }
+        };
+
         let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
 
         let (physical_device, _physical_device_properties) = Self::pick_physical_device(&instance)?;
