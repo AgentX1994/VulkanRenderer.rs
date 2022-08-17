@@ -263,24 +263,42 @@ impl Renderer {
         device: &Device,
         format: &vk::SurfaceFormatKHR,
     ) -> VkResult<vk::RenderPass> {
-        let attachments = [vk::AttachmentDescription::builder()
-            .format(format.format)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
-            .store_op(vk::AttachmentStoreOp::STORE)
-            .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
-            .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
-            .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .build()];
+        let attachments = [
+            vk::AttachmentDescription::builder()
+                .format(format.format)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .build(),
+            vk::AttachmentDescription::builder()
+                .format(vk::Format::D32_SFLOAT)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::UNDEFINED)
+                .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .build(),
+        ];
 
         let color_attachment_references = [vk::AttachmentReference {
             attachment: 0,
             layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         }];
 
+        let depth_attachment_reference = vk::AttachmentReference {
+            attachment: 1,
+            layout: vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        };
+
         let subpasses = [vk::SubpassDescription::builder()
             .color_attachments(&color_attachment_references)
+            .depth_stencil_attachment(&depth_attachment_reference)
             .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
             .build()];
 
@@ -304,6 +322,7 @@ impl Renderer {
     fn create_framebuffers(
         device: &Device,
         image_views: &[vk::ImageView],
+        depth_image_view: &vk::ImageView,
         extent: vk::Extent2D,
         render_pass: &vk::RenderPass,
     ) -> VkResult<Vec<vk::Framebuffer>> {
@@ -311,7 +330,7 @@ impl Renderer {
         image_views
             .iter()
             .map(|iv| {
-                let iview = [*iv];
+                let iview = [*iv, *depth_image_view];
                 let framebuffer_info = vk::FramebufferCreateInfo::builder()
                     .render_pass(*render_pass)
                     .attachments(&iview)
@@ -338,11 +357,19 @@ impl Renderer {
             unsafe {
                 device.begin_command_buffer(cmd_buf, &command_buffer_begin_info)?;
             }
-            let clear_values = [vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.08, 1.0],
+            let clear_values = [
+                vk::ClearValue {
+                    color: vk::ClearColorValue {
+                        float32: [0.0, 0.0, 0.08, 1.0],
+                    },
                 },
-            }];
+                vk::ClearValue {
+                    depth_stencil: vk::ClearDepthStencilValue {
+                        depth: 1.0,
+                        stencil: 0,
+                    },
+                },
+            ];
             let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
                 .render_pass(*render_pass)
                 .framebuffer(framebuffers[i])
@@ -473,7 +500,14 @@ impl Renderer {
             instance: instance.clone(),
             device: device.clone(),
             physical_device,
-            debug_settings: Default::default(),
+            debug_settings: gpu_allocator::AllocatorDebugSettings {
+                log_memory_information: true,
+                log_leaks_on_shutdown: true,
+                store_stack_traces: false,
+                log_allocations: true,
+                log_frees: true,
+                log_stack_traces: false,
+            },
             buffer_device_address: false,
         })
         .unwrap(); // TODO error handling
@@ -486,12 +520,14 @@ impl Renderer {
             &surface,
             &surface_loader,
             graphics_queue_index,
+            &mut allocator,
         )?;
 
         let render_pass = Self::create_render_pass(&device, &swapchain.get_image_format())?;
         let framebuffers = Self::create_framebuffers(
             &device,
             swapchain.get_image_views(),
+            swapchain.get_depth_image_view(),
             swapchain.get_extent(),
             &render_pass,
         )?;
@@ -569,6 +605,18 @@ impl Renderer {
         // vertex_buffer.fill(&allocator, data)?;
 
         let mut cube = Model::<Vertex, InstanceData>::cube();
+        cube.insert_visibly(InstanceData {
+            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.05, 0.05, 0.1))
+                * na::Mat4::new_scaling(0.1))
+            .into(),
+            color_mod: [1.0, 1.0, 0.2],
+        });
+        cube.insert_visibly(InstanceData {
+            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.05, -0.05, 0.5))
+                * na::Mat4::new_scaling(0.1))
+            .into(),
+            color_mod: [0.2, 0.4, 1.0],
+        });
         cube.insert_visibly(InstanceData {
             model_matrix: na::Mat4::new_scaling(0.1).into(),
             color_mod: [1.0, 0.0, 0.0],
@@ -714,18 +762,16 @@ impl Drop for Renderer {
             self.device
                 .device_wait_idle()
                 .expect("Something wrong while waiting for idle");
-            //self.vertex_buffer.destroy(&self.allocator);
-            {
-                let mut allocator = self.allocator.take().expect("We had no allocator?!");
-                for m in &mut self.models {
-                    if let Some(vb) = &mut m.vertex_buffer {
-                        vb.destroy(&mut allocator);
-                    }
-                    if let Some(ib) = &mut m.instance_buffer {
-                        ib.destroy(&mut allocator);
-                    }
+            let mut allocator = self.allocator.take().expect("We had no allocator?!");
+            for m in &mut self.models {
+                if let Some(vb) = &mut m.vertex_buffer {
+                    vb.destroy(&mut allocator);
+                }
+                if let Some(ib) = &mut m.instance_buffer {
+                    ib.destroy(&mut allocator);
                 }
             }
+
             self.frame_data.clear();
             self.device
                 .destroy_command_pool(self.graphics_command_pool, None);
@@ -735,8 +781,9 @@ impl Drop for Renderer {
                 self.device.destroy_framebuffer(*fb, None);
             }
             self.device.destroy_render_pass(self.render_pass, None);
-            self.swapchain.destroy();
+            self.swapchain.destroy(&mut allocator);
             self.surface_loader.destroy_surface(self.surface, None);
+            drop(allocator); // Ensure all memory is freed
             self.device.destroy_device(None);
             self.debug_utils
                 .destroy_debug_utils_messenger(self.utils_messenger, None);

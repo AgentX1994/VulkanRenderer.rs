@@ -3,6 +3,9 @@ use ash::prelude::VkResult;
 use ash::vk;
 use ash::{Device, Instance};
 
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
+use gpu_allocator::MemoryLocation;
+
 pub struct Swapchain {
     device: Device,
     swapchain: vk::SwapchainKHR,
@@ -13,6 +16,9 @@ pub struct Swapchain {
     image_format: vk::SurfaceFormatKHR,
     extent: vk::Extent2D,
     image_views: Vec<vk::ImageView>,
+    depth_image: vk::Image,
+    depth_image_allocation: Option<Allocation>,
+    depth_image_view: vk::ImageView,
 }
 
 impl Swapchain {
@@ -52,6 +58,7 @@ impl Swapchain {
         surface: &vk::SurfaceKHR,
         surface_loader: &khr::Surface,
         graphics_queue_index: u32,
+        allocator: &mut Allocator,
     ) -> VkResult<Self> {
         // Get capabilities of the surface
         let surface_capabilities = unsafe {
@@ -111,6 +118,55 @@ impl Swapchain {
         let images = unsafe { swapchain_loader.get_swapchain_images(swapchain)? };
         let image_views = Self::create_image_views(device, format, &images[..]);
 
+        // Create depth image
+        let extent_3d = vk::Extent3D {
+            width: extent.width,
+            height: extent.height,
+            depth: 1,
+        };
+        let depth_image_info = vk::ImageCreateInfo::builder()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(vk::Format::D32_SFLOAT)
+            .extent(extent_3d)
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .queue_family_indices(&queue_families);
+
+        let depth_image = unsafe { device.create_image(&depth_image_info, None) }?;
+        let reqs = unsafe { device.get_image_memory_requirements(depth_image) };
+        let depth_image_allocation = allocator
+            .allocate(&AllocationCreateDesc {
+                name: "depth_image",
+                requirements: reqs,
+                location: MemoryLocation::GpuOnly,
+                linear: false,
+            })
+            .unwrap(); // TODO error handling.
+        unsafe {
+            device.bind_image_memory(
+                depth_image,
+                depth_image_allocation.memory(),
+                depth_image_allocation.offset(),
+            )?;
+        }
+
+        let subresource_range = vk::ImageSubresourceRange::builder()
+            .aspect_mask(vk::ImageAspectFlags::DEPTH)
+            .base_mip_level(0)
+            .level_count(1)
+            .base_array_layer(0)
+            .layer_count(1);
+        let image_view_create_info = vk::ImageViewCreateInfo::builder()
+            .image(depth_image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(vk::Format::D32_SFLOAT)
+            .subresource_range(*subresource_range);
+        let depth_image_view = unsafe { device.create_image_view(&image_view_create_info, None) }?;
+
         Ok(Swapchain {
             device: device.clone(),
             swapchain,
@@ -121,6 +177,9 @@ impl Swapchain {
             image_views,
             image_format: *format,
             extent,
+            depth_image,
+            depth_image_allocation: Some(depth_image_allocation),
+            depth_image_view,
         })
     }
 
@@ -165,6 +224,10 @@ impl Swapchain {
         Ok(image_index)
     }
 
+    pub fn get_depth_image_view(&self) -> &vk::ImageView {
+        &self.depth_image_view
+    }
+
     pub fn present(
         &self,
         queue: &vk::Queue,
@@ -184,7 +247,18 @@ impl Swapchain {
         Ok(())
     }
 
-    pub fn destroy(&mut self) {
+    pub fn destroy(&mut self, allocator: &mut Allocator) {
+        allocator
+            .free(
+                self.depth_image_allocation
+                    .take()
+                    .expect("No depth image allocation!"),
+            )
+            .expect("Could not free memory");
+        unsafe {
+            self.device.destroy_image_view(self.depth_image_view, None);
+            self.device.destroy_image(self.depth_image, None);
+        }
         for iv in self.image_views.iter() {
             unsafe { self.device.destroy_image_view(*iv, None) };
         }

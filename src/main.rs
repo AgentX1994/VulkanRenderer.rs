@@ -10,6 +10,7 @@ use winit::platform::unix::WindowExtUnix;
 use vulkan_rust::renderer::Renderer;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::init();
     // Create window
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::Window::new(&event_loop)?;

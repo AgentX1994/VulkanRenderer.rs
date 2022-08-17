@@ -65,6 +65,10 @@ impl GraphicsPipeline {
                     | vk::ColorComponentFlags::A,
             )
             .build()];
+        let depth_stencil_info = vk::PipelineDepthStencilStateCreateInfo::builder()
+            .depth_test_enable(true)
+            .depth_write_enable(true)
+            .depth_compare_op(vk::CompareOp::LESS_OR_EQUAL);
         let color_blend_info =
             vk::PipelineColorBlendStateCreateInfo::builder().attachments(&color_blend_attachments);
 
@@ -79,6 +83,7 @@ impl GraphicsPipeline {
             .viewport_state(&viewport_info)
             .rasterization_state(&rasterizer_info)
             .multisample_state(&multisampling_info)
+            .depth_stencil_state(&depth_stencil_info)
             .color_blend_state(&color_blend_info)
             .layout(pipeline_layout)
             .render_pass(*render_pass)
@@ -107,7 +112,8 @@ impl GraphicsPipeline {
     pub fn destroy(&mut self) {
         unsafe {
             self.device.destroy_pipeline(self.pipeline, None);
-            self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
         }
     }
 }
