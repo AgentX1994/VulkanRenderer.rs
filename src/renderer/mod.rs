@@ -98,18 +98,19 @@ impl Drop for FrameData {
     }
 }
 
+#[allow(dead_code)]
 pub struct InstanceData {
-    model_matrix: [[f32; 4]; 4],
-    color_mod: [f32; 3],
+    pub model_matrix: [[f32; 4]; 4],
+    pub color_mod: [f32; 3],
 }
 
 pub struct Renderer {
     dropped: bool,
     entry: ash::Entry,
-    allocator: Option<Allocator>,
+    pub allocator: Option<Allocator>,
     instance: Instance,
     physical_device: vk::PhysicalDevice,
-    device: Device,
+    pub device: Device,
     debug_utils: ext::DebugUtils,
     utils_messenger: vk::DebugUtilsMessengerEXT,
     surface: vk::SurfaceKHR,
@@ -124,8 +125,7 @@ pub struct Renderer {
     frame_data: Vec<FrameData>,
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
-    //vertex_buffer: Buffer,
-    models: Vec<Model<Vertex, InstanceData>>,
+    pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
 impl Renderer {
@@ -342,61 +342,56 @@ impl Renderer {
             .collect()
     }
 
-    pub fn fill_command_buffers(
+    pub fn update_command_buffer(
         device: &Device,
         render_pass: &vk::RenderPass,
-        framebuffers: &[vk::Framebuffer],
+        framebuffer: &vk::Framebuffer,
         extent: &vk::Extent2D,
         graphics_pipeline: &GraphicsPipeline,
-        cmd_bufs: &[vk::CommandBuffer],
-        //buffer: vk::Buffer,
+        cmd_buf: &vk::CommandBuffer,
         models: &[Model<Vertex, InstanceData>],
     ) -> VkResult<()> {
-        for (i, &cmd_buf) in cmd_bufs.iter().enumerate() {
-            let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
-            unsafe {
-                device.begin_command_buffer(cmd_buf, &command_buffer_begin_info)?;
-            }
-            let clear_values = [
-                vk::ClearValue {
-                    color: vk::ClearColorValue {
-                        float32: [0.0, 0.0, 0.08, 1.0],
-                    },
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
+        unsafe {
+            device.begin_command_buffer(*cmd_buf, &command_buffer_begin_info)?;
+        }
+        let clear_values = [
+            vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.08, 1.0],
                 },
-                vk::ClearValue {
-                    depth_stencil: vk::ClearDepthStencilValue {
-                        depth: 1.0,
-                        stencil: 0,
-                    },
+            },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
                 },
-            ];
-            let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-                .render_pass(*render_pass)
-                .framebuffer(framebuffers[i])
-                .render_area(vk::Rect2D {
-                    offset: vk::Offset2D { x: 0, y: 0 },
-                    extent: *extent,
-                })
-                .clear_values(&clear_values);
-            unsafe {
-                device.cmd_begin_render_pass(
-                    cmd_buf,
-                    &render_pass_begin_info,
-                    vk::SubpassContents::INLINE,
-                );
-                device.cmd_bind_pipeline(
-                    cmd_buf,
-                    vk::PipelineBindPoint::GRAPHICS,
-                    graphics_pipeline.pipeline,
-                );
-                //device.cmd_bind_vertex_buffers(cmd_buf, 0, &[buffer], &[0]);
-                //device.cmd_draw(cmd_buf, 3, 1, 0, 0);
-                for m in models {
-                    m.draw(device, cmd_buf);
-                }
-                device.cmd_end_render_pass(cmd_buf);
-                device.end_command_buffer(cmd_buf)?;
+            },
+        ];
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(*render_pass)
+            .framebuffer(*framebuffer)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: *extent,
+            })
+            .clear_values(&clear_values);
+        unsafe {
+            device.cmd_begin_render_pass(
+                *cmd_buf,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            device.cmd_bind_pipeline(
+                *cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                graphics_pipeline.pipeline,
+            );
+            for m in models {
+                m.draw(device, *cmd_buf);
             }
+            device.cmd_end_render_pass(*cmd_buf);
+            device.end_command_buffer(*cmd_buf)?;
         }
         Ok(())
     }
@@ -549,104 +544,11 @@ impl Renderer {
         let graphics_command_pool =
             unsafe { device.create_command_pool(&graphics_commandpool_info, None)? };
 
-        // let transfer_commandpool_info = vk::CommandPoolCreateInfo::builder()
-        //     .queue_family_index(transfer_queue_index)
-        //     .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
-        // let transfer_command_pool =
-        //     unsafe { device.create_command_pool(&transfer_commandpool_info, None)? };
-
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(graphics_command_pool)
             .command_buffer_count(framebuffers.len() as u32);
         let command_buffers =
             unsafe { device.allocate_command_buffers(&command_buffer_allocate_info)? };
-
-        // let data = [
-        //     -0.5f32, 0.0f32, 0.0f32, 1.0f32,  // pos
-        //     15.0f32, // size
-        //     0.0f32, 0.5f32, 1.0f32, 1.0f32, // color
-        //     0.5f32, 1.0f32, 0.0f32, 1.0f32,  // pos
-        //     15.0f32, // size
-        //     1.0f32, 0.5f32, 1.0f32, 1.0f32, // color
-        //     -0.5f32, 1.0f32, 0.0f32, 1.0f32,  // pos
-        //     15.0f32, // size
-        //     1.0f32, 0.5f32, 0.0f32, 1.0f32, // color
-        // ];
-
-        // let vertices = [
-        //     Vertex::new(
-        //         vec3(-0.5f32, 0.0f32, 0.0f32),
-        //         vec3(0.0f32, 0.5f32, 1.0f32),
-        //         vec2(0.0f32, 0.0f32),
-        //     ),
-        //     Vertex::new(
-        //         vec3(0.5f32, 1.0f32, 0.0f32),
-        //         vec3(1.0f32, 0.5f32, 1.0f32),
-        //         vec2(0.0f32, 0.0f32),
-        //     ),
-        //     Vertex::new(
-        //         vec3(-0.5f32, 1.0f32, 0.0f32),
-        //         vec3(1.0f32, 0.5f32, 0.0f32),
-        //         vec2(0.0f32, 0.0f32),
-        //     ),
-        // ];
-
-        // let mut vertex_buffer = Buffer::new(
-        //     &allocator,
-        //     std::mem::size_of::<[Vertex; 3]>() as u64,
-        //     vk::BufferUsageFlags::VERTEX_BUFFER,
-        //     vk_mem::MemoryUsage::CpuToGpu,
-        // )?;
-
-        // let data = unsafe {
-        //     std::slice::from_raw_parts(vertices.as_ptr() as *const u8, vertex_buffer.size as usize)
-        // };
-
-        // vertex_buffer.fill(&allocator, data)?;
-
-        let mut cube = Model::<Vertex, InstanceData>::cube();
-        cube.insert_visibly(InstanceData {
-            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.05, 0.05, 0.1))
-                * na::Mat4::new_scaling(0.1))
-            .into(),
-            color_mod: [1.0, 1.0, 0.2],
-        });
-        cube.insert_visibly(InstanceData {
-            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.05, -0.05, 0.5))
-                * na::Mat4::new_scaling(0.1))
-            .into(),
-            color_mod: [0.2, 0.4, 1.0],
-        });
-        cube.insert_visibly(InstanceData {
-            model_matrix: na::Mat4::new_scaling(0.1).into(),
-            color_mod: [1.0, 0.0, 0.0],
-        });
-        cube.insert_visibly(InstanceData {
-            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.0, 0.25, 0.0))
-                * na::Mat4::new_scaling(0.1))
-            .into(),
-            color_mod: [0.0, 1.0, 0.0],
-        });
-        cube.insert_visibly(InstanceData {
-            model_matrix: (na::Mat4::new_translation(&na::Vec3::new(0.0, 0.5, 0.0))
-                * na::Mat4::new_scaling(0.1))
-            .into(),
-            color_mod: [0.0, 1.0, 0.0],
-        });
-        cube.update_vertex_buffer(&device, &mut allocator)?;
-        cube.update_instance_buffer(&device, &mut allocator)?;
-        let models = vec![cube];
-
-        Self::fill_command_buffers(
-            &device,
-            &render_pass,
-            &framebuffers[..],
-            &swapchain.get_extent(),
-            &graphics_pipeline,
-            &command_buffers[..],
-            // vertex_buffer.buffer,
-            &models,
-        )?;
 
         let frame_data = Self::create_frame_data(&device, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.get_actual_image_count() as usize];
@@ -672,7 +574,7 @@ impl Renderer {
             frame_data,
             images_in_flight,
             current_image: 0,
-            models,
+            models: vec![],
         })
     }
 
@@ -702,7 +604,8 @@ impl Renderer {
         Ok(())
     }
 
-    fn submit_commands(&self, cmd_buf: &vk::CommandBuffer) -> VkResult<()> {
+    fn submit_commands(&mut self, image_index: usize) -> VkResult<()> {
+        let cmd_buf = &self.command_buffers[image_index];
         let this_frame_data = &self.frame_data[self.current_image];
         let semaphores_available = [this_frame_data.image_available_semaphore];
         let waiting_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -717,6 +620,22 @@ impl Renderer {
         unsafe {
             self.device
                 .reset_fences(&[this_frame_data.in_flight_fence])?;
+            Self::update_command_buffer(
+                &self.device,
+                &self.render_pass,
+                &self.framebuffers[image_index],
+                &self.swapchain.get_extent(),
+                &self.graphics_pipeline,
+                &self.command_buffers[image_index],
+                &self.models,
+            )?;
+            if let Some(alloc) = &mut self.allocator {
+                for m in &mut self.models {
+                    m.update_instance_buffer(&self.device, alloc)?;
+                }
+            } else {
+                panic!("No allocator!");
+            }
             self.device.queue_submit(
                 self.graphics_queue,
                 &submit_info,
@@ -745,7 +664,7 @@ impl Renderer {
 
         self.wait_for_image_fence_and_set_new_fence(image_index as usize)?;
 
-        self.submit_commands(&self.command_buffers[image_index as usize])?;
+        self.submit_commands(image_index as usize)?;
 
         self.present(image_index)?;
         self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
