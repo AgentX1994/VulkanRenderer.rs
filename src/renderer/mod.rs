@@ -141,6 +141,7 @@ impl Renderer {
         entry: &ash::Entry,
         layer_names: &[*const i8],
         mut debug_create_info: vk::DebugUtilsMessengerCreateInfoEXT,
+        use_wayland: bool
     ) -> Result<ash::Instance, ash::vk::Result> {
         // TODO Return errors
         let engine_name_c = CString::new(engine_name).unwrap();
@@ -154,16 +155,22 @@ impl Renderer {
             .engine_version(vk::make_api_version(0, 0, 42, 0))
             .api_version(vk::API_VERSION_1_3);
 
-        let instance_extension_names = [
+        let mut instance_extension_names = vec![
             ext::DebugUtils::name().as_ptr(),
-            khr::Surface::name().as_ptr(),
-            #[cfg(target_os = "windows")]
-            khr::Win32Surface::name().as_ptr(),
-            #[cfg(not(target_os = "windows"))]
-            khr::XlibSurface::name().as_ptr(),
-            #[cfg(not(target_os = "windows"))]
-            khr::WaylandSurface::name().as_ptr(),
+            khr::Surface::name().as_ptr()
         ];
+        #[cfg(target_os="windows")]
+        {
+            instance_extension_names.push(khr::Win32Surface::name().as_ptr());
+        }
+        #[cfg(target_os="linux")]
+        {
+            if use_wayland {
+                instance_extension_names.push(khr::WaylandSurface::name().as_ptr());
+            } else {
+                instance_extension_names.push(khr::XlibSurface::name().as_ptr());
+            }
+        }
 
         // Create instance
         let instance_create_info = vk::InstanceCreateInfo::builder()
@@ -396,7 +403,7 @@ impl Renderer {
             .pfn_user_callback(Some(vulkan_debug_utils_callback));
 
         let instance =
-            Self::create_instance(name, "My Engine", &entry, &layers[..], *debug_create_info)?;
+            Self::create_instance(name, "My Engine", &entry, &layers[..], *debug_create_info, use_wayland)?;
 
         // Create debug messenger
         let debug_utils = ext::DebugUtils::new(&entry, &instance);

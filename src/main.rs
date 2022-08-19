@@ -113,34 +113,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             *controlflow = winit::event_loop::ControlFlow::Exit;
         }
         Event::WindowEvent {
-            event: WindowEvent::KeyboardInput { input, .. },
+            event:
+                WindowEvent::KeyboardInput {
+                    input:
+                        winit::event::KeyboardInput {
+                            state: winit::event::ElementState::Pressed,
+                            virtual_keycode: Some(keycode),
+                            ..
+                        },
+                    ..
+                },
             ..
-        } => match input {
-            winit::event::KeyboardInput {
-                state: winit::event::ElementState::Pressed,
-                virtual_keycode: Some(keycode),
-                ..
-            } => match keycode {
-                winit::event::VirtualKeyCode::Right => {
-                    camera.turn_right(0.1);
-                }
-                winit::event::VirtualKeyCode::Left => {
-                    camera.turn_left(0.1);
-                }
-                winit::event::VirtualKeyCode::Up => {
-                    camera.move_forward(0.1);
-                }
-                winit::event::VirtualKeyCode::Down => {
-                    camera.move_backward(0.1);
-                }
-                winit::event::VirtualKeyCode::PageUp => {
-                    camera.turn_up(0.02);
-                }
-                winit::event::VirtualKeyCode::PageDown => {
-                    camera.turn_down(0.02);
-                }
-                _ => {}
-            },
+        } => match keycode {
+            winit::event::VirtualKeyCode::Right => {
+                camera.turn_right(0.1);
+            }
+            winit::event::VirtualKeyCode::Left => {
+                camera.turn_left(0.1);
+            }
+            winit::event::VirtualKeyCode::Up => {
+                camera.move_forward(0.1);
+            }
+            winit::event::VirtualKeyCode::Down => {
+                camera.move_backward(0.1);
+            }
+            winit::event::VirtualKeyCode::PageUp => {
+                camera.turn_up(0.02);
+            }
+            winit::event::VirtualKeyCode::PageDown => {
+                camera.turn_down(0.02);
+            }
             _ => {}
         },
         Event::MainEventsCleared => {

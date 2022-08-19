@@ -41,7 +41,7 @@ pub struct Model<V, I> {
 impl<V, I> Model<V, I> {
     pub fn cube() -> Model<Vertex, InstanceData> {
         let lbf = Vertex::new(
-            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(-1.0, 1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //lbf: left-bottom-front
@@ -51,7 +51,7 @@ impl<V, I> Model<V, I> {
             Vec2::new(0.5, 0.5),
         );
         let ltf = Vertex::new(
-            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(-1.0, -1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
@@ -61,7 +61,7 @@ impl<V, I> Model<V, I> {
             Vec2::new(0.5, 0.5),
         );
         let rbf = Vertex::new(
-            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
@@ -71,7 +71,7 @@ impl<V, I> Model<V, I> {
             Vec2::new(0.5, 0.5),
         );
         let rtf = Vertex::new(
-            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
