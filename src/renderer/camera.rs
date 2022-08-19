@@ -5,26 +5,110 @@ use nalgebra_glm as glm;
 
 use super::buffer::Buffer;
 
+pub struct CameraBuilder {
+    position: glm::Vec3,
+    view_direction: na::Unit<glm::Vec3>,
+    down_direction: na::Unit<glm::Vec3>,
+    fovy: f32,
+    aspect: f32,
+    near: f32,
+    far: f32,
+}
+
+impl CameraBuilder {
+    pub fn position(mut self, pos: glm::Vec3) -> CameraBuilder {
+        self.position = pos;
+        self
+    }
+
+    pub fn fovy(mut self, fovy: f32) -> CameraBuilder {
+        self.fovy = fovy.max(0.01).min(std::f32::consts::PI - 0.01);
+        self
+    }
+
+    pub fn aspect(mut self, aspect: f32) -> CameraBuilder {
+        self.aspect = aspect;
+        self
+    }
+
+    pub fn near(mut self, near: f32) -> CameraBuilder {
+        self.near = near;
+        self
+    }
+
+    pub fn far(mut self, far: f32) -> CameraBuilder {
+        self.far = far;
+        self
+    }
+
+    pub fn view_direction(mut self, direction: glm::Vec3) -> CameraBuilder {
+        self.view_direction = na::Unit::new_normalize(direction);
+        self
+    }
+
+    pub fn down_direction(mut self, direction: glm::Vec3) -> CameraBuilder {
+        self.down_direction = na::Unit::new_normalize(direction);
+        self
+    }
+
+    pub fn build(self) -> Camera {
+        if self.far < self.near {
+            // TODO return error
+            panic!(
+                "Far plane (at {}) closer than near plane (at {})!",
+                self.far, self.near
+            );
+        }
+        let mut cam = Camera {
+            position: self.position,
+            view_direction: self.view_direction,
+            down_direction: na::Unit::new_normalize(
+                self.down_direction.as_ref()
+                    - self
+                        .down_direction
+                        .as_ref()
+                        .dot(self.view_direction.as_ref())
+                        * self.view_direction.as_ref(),
+            ),
+            fovy: self.fovy,
+            aspect: self.aspect,
+            near: self.near,
+            far: self.far,
+            view_matrix: glm::Mat4::identity(),
+            projection_matrix: glm::Mat4::identity(),
+        };
+        cam.update_projection_matrix();
+        cam.update_view_matrix();
+        cam
+    }
+}
+
 pub struct Camera {
     view_matrix: glm::Mat4,
     position: glm::Vec3,
     view_direction: na::Unit<glm::Vec3>,
     down_direction: na::Unit<glm::Vec3>,
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Camera {
-            view_matrix: glm::Mat4::identity(),
-            position: glm::Vec3::default(),
-            view_direction: na::Unit::new_normalize(glm::Vec3::new(0.0, 0.0, 1.0)),
-            down_direction: na::Unit::new_normalize(glm::Vec3::new(0.0, 1.0, 0.0)),
-        }
-    }
+    fovy: f32,
+    aspect: f32,
+    near: f32,
+    far: f32,
+    projection_matrix: glm::Mat4,
 }
 
 impl Camera {
-    fn update_matrix(&mut self) {
+    pub fn builder() -> CameraBuilder {
+        CameraBuilder {
+            position: glm::Vec3::new(0.0, -3.0, -3.0),
+            view_direction: na::Unit::new_normalize(glm::Vec3::new(0.0, 1.0, 1.0)),
+            down_direction: na::Unit::new_normalize(glm::Vec3::new(0.0, 1.0, -1.0)),
+            fovy: std::f32::consts::FRAC_PI_3,
+            aspect: 800.0 / 600.0,
+            near: 0.1,
+            far: 100.0,
+        }
+    }
+
+    fn update_view_matrix(&mut self) {
         let right = na::Unit::new_normalize(self.down_direction.cross(&self.view_direction));
         self.view_matrix = glm::Mat4::new(
             right.x,
@@ -45,10 +129,31 @@ impl Camera {
             1.0,
         );
     }
+    fn update_projection_matrix(&mut self) {
+        let d = 1.0 / (0.5 * self.fovy).tan();
+        self.projection_matrix = glm::Mat4::new(
+            d / self.aspect,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            d,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            self.far / (self.far - self.near),
+            -self.near * self.far / (self.far - self.near),
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+        );
+    }
 
     pub fn move_forward(&mut self, distance: f32) {
         self.position += distance * self.view_direction.as_ref();
-        self.update_matrix();
+        self.update_view_matrix();
     }
 
     pub fn move_backward(&mut self, distance: f32) {
@@ -58,7 +163,7 @@ impl Camera {
     pub fn turn_right(&mut self, angle: f32) {
         let rotation = na::Rotation3::from_axis_angle(&self.down_direction, angle);
         self.view_direction = rotation * self.view_direction;
-        self.update_matrix();
+        self.update_view_matrix();
     }
 
     pub fn turn_left(&mut self, angle: f32) {
@@ -70,7 +175,7 @@ impl Camera {
         let rotation = na::Rotation3::from_axis_angle(&right, angle);
         self.view_direction = rotation * self.view_direction;
         self.down_direction = rotation * self.down_direction;
-        self.update_matrix();
+        self.update_view_matrix();
     }
 
     pub fn turn_down(&mut self, angle: f32) {
@@ -82,8 +187,9 @@ impl Camera {
         allocator: &mut Allocator,
         buffer: &mut Buffer,
     ) -> VkResult<()> {
-        let data_array: [[f32; 4]; 4] = self.view_matrix.into();
-        let bytes = std::mem::size_of::<[[f32; 4]; 4]>();
+        let data_array: [[[f32; 4]; 4]; 2] =
+            [self.view_matrix.into(), self.projection_matrix.into()];
+        let bytes = std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
         let data = unsafe { std::slice::from_raw_parts(data_array.as_ptr() as *const u8, bytes) };
         buffer.fill(allocator, data)
     }

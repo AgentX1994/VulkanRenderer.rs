@@ -95,11 +95,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     if let Some(allo) = &mut renderer.allocator {
         cube.update_vertex_buffer(&renderer.device, allo)?;
+        cube.update_index_buffer(&renderer.device, allo)?;
         cube.update_instance_buffer(&renderer.device, allo)?;
     }
     renderer.models = vec![cube];
 
-    let mut camera = Camera::default();
+    let mut camera = Camera::builder().build();
 
     // Run event loop
     let mut running = true;

@@ -109,10 +109,10 @@ pub struct InstanceData {
 
 pub struct Renderer {
     dropped: bool,
-    entry: ash::Entry,
+    _entry: ash::Entry,
     pub allocator: Option<Allocator>,
     instance: Instance,
-    physical_device: vk::PhysicalDevice,
+    _physical_device: vk::PhysicalDevice,
     pub device: Device,
     debug_utils: ext::DebugUtils,
     utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -506,18 +506,19 @@ impl Renderer {
         let images_in_flight = vec![vk::Fence::null(); swapchain.get_actual_image_count() as usize];
 
         // Create uniform buffer
-        let camera_transform: [[f32; 4]; 4] = glm::Mat4::identity().into();
+        let camera_transforms: [[[f32; 4]; 4]; 2] =
+            [glm::Mat4::identity().into(), glm::Mat4::identity().into()];
         let mut uniform_buffer = Buffer::new(
             &device,
             &mut allocator,
-            std::mem::size_of::<[[f32; 4]; 4]>() as u64,
+            std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             MemoryLocation::CpuToGpu,
         )?;
 
-        let bytes = std::mem::size_of::<[[f32; 4]; 4]>();
+        let bytes = std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
         let data =
-            unsafe { std::slice::from_raw_parts(camera_transform.as_ptr() as *const u8, bytes) };
+            unsafe { std::slice::from_raw_parts(camera_transforms.as_ptr() as *const u8, bytes) };
         uniform_buffer.fill(&mut allocator, data)?;
 
         // Create descriptor pool
@@ -543,11 +544,11 @@ impl Renderer {
         let descriptor_sets =
             unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info)? };
 
-        for (i, ds) in descriptor_sets.iter().enumerate() {
+        for ds in descriptor_sets.iter() {
             let buffer_info = [vk::DescriptorBufferInfo {
                 buffer: uniform_buffer.buffer,
                 offset: 0,
-                range: 64,
+                range: std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
             }];
 
             let desc_sets_write = [vk::WriteDescriptorSet::builder()
@@ -563,10 +564,10 @@ impl Renderer {
 
         Ok(Renderer {
             dropped: false,
-            entry,
+            _entry: entry,
             instance,
             allocator: Some(allocator),
-            physical_device,
+            _physical_device: physical_device,
             device,
             debug_utils,
             utils_messenger,
@@ -757,6 +758,9 @@ impl Drop for Renderer {
             for m in &mut self.models {
                 if let Some(vb) = &mut m.vertex_buffer {
                     vb.destroy(&mut allocator);
+                }
+                if let Some(ib) = &mut m.index_buffer {
+                    ib.destroy(&mut allocator);
                 }
                 if let Some(ib) = &mut m.instance_buffer {
                     ib.destroy(&mut allocator);

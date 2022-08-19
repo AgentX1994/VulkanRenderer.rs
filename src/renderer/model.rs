@@ -27,12 +27,14 @@ impl std::error::Error for InvalidHandle {
 
 pub struct Model<V, I> {
     vertex_data: Vec<V>,
+    index_data: Vec<u32>,
     handle_to_index: HashMap<usize, usize>,
     handles: Vec<usize>,
     instances: Vec<I>,
     first_invisible: usize,
     next_handle: usize,
     pub vertex_buffer: Option<Buffer>,
+    pub index_buffer: Option<Buffer>,
     pub instance_buffer: Option<Buffer>,
 }
 
@@ -79,13 +81,14 @@ impl<V, I> Model<V, I> {
             Vec2::new(0.5, 0.5),
         );
         Model {
-            vertex_data: vec![
-                lbf, lbb, rbb, lbf, rbb, rbf, //bottom
-                ltf, rtb, ltb, ltf, rtf, rtb, //top
-                lbf, rtf, ltf, lbf, rbf, rtf, //front
-                lbb, ltb, rtb, lbb, rtb, rbb, //back
-                lbf, ltf, lbb, lbb, ltf, ltb, //left
-                rbf, rbb, rtf, rbb, rtb, rtf, //right
+            vertex_data: vec![lbf, lbb, ltf, ltb, rbf, rbb, rtf, rtb],
+            index_data: vec![
+                0, 1, 5, 0, 5, 4, // bottom
+                2, 7, 3, 2, 6, 7, // top
+                0, 6, 2, 0, 4, 6, // front
+                1, 3, 7, 1, 7, 5, // back
+                0, 2, 1, 1, 2, 3, // left
+                4, 5, 6, 5, 7, 6, // right
             ],
             handle_to_index: std::collections::HashMap::new(),
             handles: Vec::new(),
@@ -93,9 +96,11 @@ impl<V, I> Model<V, I> {
             first_invisible: 0,
             next_handle: 0,
             vertex_buffer: None,
+            index_buffer: None,
             instance_buffer: None,
         }
     }
+
     pub fn get(&self, handle: usize) -> Option<&I> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             self.instances.get(index)
@@ -207,7 +212,11 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    pub fn update_vertex_buffer(&mut self, device: &ash::Device, allocator: &mut Allocator) -> VkResult<()> {
+    pub fn update_vertex_buffer(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+    ) -> VkResult<()> {
         if let Some(buffer) = &mut self.vertex_buffer {
             let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
             let data = unsafe {
@@ -233,7 +242,39 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    pub fn update_instance_buffer(&mut self, device: &ash::Device, allocator: &mut Allocator) -> VkResult<()> {
+    pub fn update_index_buffer(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+    ) -> VkResult<()> {
+        if let Some(buffer) = &mut self.index_buffer {
+            let bytes = self.vertex_data.len() * std::mem::size_of::<u32>();
+            let data =
+                unsafe { std::slice::from_raw_parts(self.index_data.as_ptr() as *const u8, bytes) };
+            buffer.fill(allocator, data)?;
+            Ok(())
+        } else {
+            let bytes = self.index_data.len() * std::mem::size_of::<V>();
+            let mut buffer = Buffer::new(
+                device,
+                allocator,
+                bytes as u64,
+                vk::BufferUsageFlags::INDEX_BUFFER,
+                MemoryLocation::CpuToGpu,
+            )?;
+            let data =
+                unsafe { std::slice::from_raw_parts(self.index_data.as_ptr() as *const u8, bytes) };
+            buffer.fill(allocator, data)?;
+            self.index_buffer = Some(buffer);
+            Ok(())
+        }
+    }
+
+    pub fn update_instance_buffer(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+    ) -> VkResult<()> {
         if let Some(buffer) = &mut self.instance_buffer {
             let bytes = self.first_invisible * std::mem::size_of::<I>();
             let data = unsafe {
@@ -267,28 +308,37 @@ impl<V, I> Model<V, I> {
 
     pub fn draw(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
         if let Some(vert_buf) = &self.vertex_buffer {
-            if let Some(inst_buf) = &self.instance_buffer {
-                if self.first_invisible > 0 {
-                    unsafe {
-                        device.cmd_bind_vertex_buffers(
-                            command_buffer,
-                            0,
-                            &[vert_buf.buffer],
-                            &[0],
-                        );
-                        device.cmd_bind_vertex_buffers(
-                            command_buffer,
-                            1,
-                            &[inst_buf.buffer],
-                            &[0],
-                        );
-                        device.cmd_draw(
-                            command_buffer,
-                            self.vertex_data.len() as u32,
-                            self.first_invisible as u32,
-                            0,
-                            0,
-                        );
+            if let Some(ind_buf) = &self.index_buffer {
+                if let Some(inst_buf) = &self.instance_buffer {
+                    if self.first_invisible > 0 {
+                        unsafe {
+                            device.cmd_bind_vertex_buffers(
+                                command_buffer,
+                                0,
+                                &[vert_buf.buffer],
+                                &[0],
+                            );
+                            device.cmd_bind_index_buffer(
+                                command_buffer,
+                                ind_buf.buffer,
+                                0,
+                                vk::IndexType::UINT32,
+                            );
+                            device.cmd_bind_vertex_buffers(
+                                command_buffer,
+                                1,
+                                &[inst_buf.buffer],
+                                &[0],
+                            );
+                            device.cmd_draw_indexed(
+                                command_buffer,
+                                self.index_data.len() as u32,
+                                self.first_invisible as u32,
+                                0,
+                                0,
+                                0,
+                            );
+                        }
                     }
                 }
             }
