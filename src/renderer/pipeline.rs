@@ -4,7 +4,8 @@ use ash::Device;
 
 pub struct GraphicsPipeline {
     device: Device,
-    pipeline_layout: vk::PipelineLayout,
+    pub pipeline_layout: vk::PipelineLayout,
+    pub descriptor_set_layouts: Vec<vk::DescriptorSetLayout>,
     pub pipeline: vk::Pipeline,
 }
 
@@ -72,7 +73,26 @@ impl GraphicsPipeline {
         let color_blend_info =
             vk::PipelineColorBlendStateCreateInfo::builder().attachments(&color_blend_attachments);
 
-        let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder();
+        // Create the descriptor set layout
+        let descriptor_set_layout_binding_descriptions = [vk::DescriptorSetLayoutBinding::builder()
+            .binding(0)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
+            .stage_flags(vk::ShaderStageFlags::VERTEX)
+            .build()];
+        
+        let descriptor_set_layout_info = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&descriptor_set_layout_binding_descriptions);
+        let descriptor_set_layout = unsafe {
+            device.create_descriptor_set_layout(&descriptor_set_layout_info, None)?
+        };
+
+        let descriptor_set_layouts = vec![descriptor_set_layout];
+
+        // Create the pipeline layout
+        let pipeline_layout_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&descriptor_set_layouts);
+
         let pipeline_layout =
             unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
@@ -105,12 +125,16 @@ impl GraphicsPipeline {
         Ok(GraphicsPipeline {
             device: device.clone(),
             pipeline_layout,
+            descriptor_set_layouts,
             pipeline: graphics_pipeline,
         })
     }
 
     pub fn destroy(&mut self) {
         unsafe {
+            for dsl in &self.descriptor_set_layouts {
+                self.device.destroy_descriptor_set_layout(*dsl, None);
+            }
             self.device.destroy_pipeline(self.pipeline, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);

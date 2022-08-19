@@ -8,11 +8,13 @@ use ash::prelude::VkResult;
 use ash::vk;
 use ash::{Device, Instance};
 
-use nalgebra_glm as na;
+use gpu_allocator::MemoryLocation;
+use nalgebra_glm as glm;
 
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 
 mod buffer;
+pub mod camera;
 pub mod model;
 mod pipeline;
 mod shader_module;
@@ -20,6 +22,7 @@ mod swapchain;
 pub mod vertex;
 
 use buffer::Buffer;
+use camera::Camera;
 use model::Model;
 use pipeline::GraphicsPipeline;
 use shader_module::ShaderModule;
@@ -125,6 +128,9 @@ pub struct Renderer {
     frame_data: Vec<FrameData>,
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
+    uniform_buffer: Buffer,
+    descriptor_pool: vk::DescriptorPool,
+    descriptor_sets: Vec<vk::DescriptorSet>,
     pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
@@ -342,60 +348,6 @@ impl Renderer {
             .collect()
     }
 
-    pub fn update_command_buffer(
-        device: &Device,
-        render_pass: &vk::RenderPass,
-        framebuffer: &vk::Framebuffer,
-        extent: &vk::Extent2D,
-        graphics_pipeline: &GraphicsPipeline,
-        cmd_buf: &vk::CommandBuffer,
-        models: &[Model<Vertex, InstanceData>],
-    ) -> VkResult<()> {
-        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
-        unsafe {
-            device.begin_command_buffer(*cmd_buf, &command_buffer_begin_info)?;
-        }
-        let clear_values = [
-            vk::ClearValue {
-                color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.08, 1.0],
-                },
-            },
-            vk::ClearValue {
-                depth_stencil: vk::ClearDepthStencilValue {
-                    depth: 1.0,
-                    stencil: 0,
-                },
-            },
-        ];
-        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
-            .render_pass(*render_pass)
-            .framebuffer(*framebuffer)
-            .render_area(vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent: *extent,
-            })
-            .clear_values(&clear_values);
-        unsafe {
-            device.cmd_begin_render_pass(
-                *cmd_buf,
-                &render_pass_begin_info,
-                vk::SubpassContents::INLINE,
-            );
-            device.cmd_bind_pipeline(
-                *cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                graphics_pipeline.pipeline,
-            );
-            for m in models {
-                m.draw(device, *cmd_buf);
-            }
-            device.cmd_end_render_pass(*cmd_buf);
-            device.end_command_buffer(*cmd_buf)?;
-        }
-        Ok(())
-    }
-
     fn create_frame_data(device: &Device, num: usize) -> VkResult<Vec<FrameData>> {
         let semaphore_info = vk::SemaphoreCreateInfo::builder();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
@@ -553,6 +505,62 @@ impl Renderer {
         let frame_data = Self::create_frame_data(&device, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.get_actual_image_count() as usize];
 
+        // Create uniform buffer
+        let camera_transform: [[f32; 4]; 4] = glm::Mat4::identity().into();
+        let mut uniform_buffer = Buffer::new(
+            &device,
+            &mut allocator,
+            std::mem::size_of::<[[f32; 4]; 4]>() as u64,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+
+        let bytes = std::mem::size_of::<[[f32; 4]; 4]>();
+        let data =
+            unsafe { std::slice::from_raw_parts(camera_transform.as_ptr() as *const u8, bytes) };
+        uniform_buffer.fill(&mut allocator, data)?;
+
+        // Create descriptor pool
+        let pool_sizes = [vk::DescriptorPoolSize {
+            ty: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: swapchain.get_actual_image_count(),
+        }];
+
+        let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
+            .max_sets(swapchain.get_actual_image_count())
+            .pool_sizes(&pool_sizes);
+        let descriptor_pool =
+            unsafe { device.create_descriptor_pool(&descriptor_pool_info, None)? };
+
+        // Now create the descriptor sets, one for each swapchain image
+        let descriptor_layouts = vec![
+            graphics_pipeline.descriptor_set_layouts[0];
+            swapchain.get_actual_image_count() as usize
+        ];
+        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(&descriptor_layouts);
+        let descriptor_sets =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info)? };
+
+        for (i, ds) in descriptor_sets.iter().enumerate() {
+            let buffer_info = [vk::DescriptorBufferInfo {
+                buffer: uniform_buffer.buffer,
+                offset: 0,
+                range: 64,
+            }];
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(&buffer_info)
+                .build()];
+            unsafe {
+                device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+
         Ok(Renderer {
             dropped: false,
             entry,
@@ -574,6 +582,9 @@ impl Renderer {
             frame_data,
             images_in_flight,
             current_image: 0,
+            uniform_buffer,
+            descriptor_pool,
+            descriptor_sets,
             models: vec![],
         })
     }
@@ -604,6 +615,63 @@ impl Renderer {
         Ok(())
     }
 
+    fn update_command_buffer(&self, image_index: usize) -> VkResult<()> {
+        let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
+        let cmd_buf = &self.command_buffers[image_index];
+        let framebuffer = &self.framebuffers[image_index];
+        unsafe {
+            self.device
+                .begin_command_buffer(*cmd_buf, &command_buffer_begin_info)?;
+        }
+        let clear_values = [
+            vk::ClearValue {
+                color: vk::ClearColorValue {
+                    float32: [0.0, 0.0, 0.08, 1.0],
+                },
+            },
+            vk::ClearValue {
+                depth_stencil: vk::ClearDepthStencilValue {
+                    depth: 1.0,
+                    stencil: 0,
+                },
+            },
+        ];
+        let render_pass_begin_info = vk::RenderPassBeginInfo::builder()
+            .render_pass(self.render_pass)
+            .framebuffer(*framebuffer)
+            .render_area(vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: self.swapchain.get_extent(),
+            })
+            .clear_values(&clear_values);
+        unsafe {
+            self.device.cmd_begin_render_pass(
+                *cmd_buf,
+                &render_pass_begin_info,
+                vk::SubpassContents::INLINE,
+            );
+            self.device.cmd_bind_pipeline(
+                *cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline.pipeline,
+            );
+            self.device.cmd_bind_descriptor_sets(
+                *cmd_buf,
+                vk::PipelineBindPoint::GRAPHICS,
+                self.graphics_pipeline.pipeline_layout,
+                0,
+                &[self.descriptor_sets[image_index]],
+                &[],
+            );
+            for m in &self.models {
+                m.draw(&self.device, *cmd_buf);
+            }
+            self.device.cmd_end_render_pass(*cmd_buf);
+            self.device.end_command_buffer(*cmd_buf)?;
+        }
+        Ok(())
+    }
+
     fn submit_commands(&mut self, image_index: usize) -> VkResult<()> {
         let cmd_buf = &self.command_buffers[image_index];
         let this_frame_data = &self.frame_data[self.current_image];
@@ -620,15 +688,7 @@ impl Renderer {
         unsafe {
             self.device
                 .reset_fences(&[this_frame_data.in_flight_fence])?;
-            Self::update_command_buffer(
-                &self.device,
-                &self.render_pass,
-                &self.framebuffers[image_index],
-                &self.swapchain.get_extent(),
-                &self.graphics_pipeline,
-                &self.command_buffers[image_index],
-                &self.models,
-            )?;
+            self.update_command_buffer(image_index)?;
             if let Some(alloc) = &mut self.allocator {
                 for m in &mut self.models {
                     m.update_instance_buffer(&self.device, alloc)?;
@@ -670,6 +730,14 @@ impl Renderer {
         self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
         Ok(())
     }
+
+    pub fn update_uniforms_from_camera(&mut self, camera: &Camera) -> VkResult<()> {
+        if let Some(alloc) = &mut self.allocator {
+            camera.update_buffer(alloc, &mut self.uniform_buffer)
+        } else {
+            panic!("No allocator!");
+        }
+    }
 }
 
 impl Drop for Renderer {
@@ -681,6 +749,10 @@ impl Drop for Renderer {
             self.device
                 .device_wait_idle()
                 .expect("Something wrong while waiting for idle");
+
+            self.device
+                .destroy_descriptor_pool(self.descriptor_pool, None);
+
             let mut allocator = self.allocator.take().expect("We had no allocator?!");
             for m in &mut self.models {
                 if let Some(vb) = &mut m.vertex_buffer {
@@ -690,6 +762,7 @@ impl Drop for Renderer {
                     ib.destroy(&mut allocator);
                 }
             }
+            self.uniform_buffer.destroy(&mut allocator);
 
             self.frame_data.clear();
             self.device
