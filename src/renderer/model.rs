@@ -216,6 +216,10 @@ impl<V, I> Model<V, I> {
         for _ in 0..refinements {
             model.subdivide();
         }
+        for v in &mut model.vertex_data {
+            let pos = v.pos;
+            v.pos = pos.normalize();
+        }
         model
     }
 
