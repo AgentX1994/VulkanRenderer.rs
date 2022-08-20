@@ -372,7 +372,7 @@ impl<V, I> Model<V, I> {
             buffer.fill(allocator, data)?;
             Ok(())
         } else {
-            let bytes = self.index_data.len() * std::mem::size_of::<V>();
+            let bytes = self.index_data.len() * std::mem::size_of::<u32>();
             let mut buffer = Buffer::new(
                 device,
                 allocator,
