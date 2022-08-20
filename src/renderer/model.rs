@@ -90,7 +90,7 @@ impl<V, I> Model<V, I> {
                 0, 2, 1, 1, 2, 3, // left
                 4, 5, 6, 5, 7, 6, // right
             ],
-            handle_to_index: std::collections::HashMap::new(),
+            handle_to_index: Default::default(),
             handles: Vec::new(),
             instances: Vec::new(),
             first_invisible: 0,
@@ -99,6 +99,124 @@ impl<V, I> Model<V, I> {
             index_buffer: None,
             instance_buffer: None,
         }
+    }
+
+    pub fn icosahedron() -> Model<Vertex, InstanceData> {
+        let phi = (1.0 + 5.0_f32.sqrt()) / 2.0;
+        let darkgreen_front_top = Vertex::new(
+            Vec3::new(phi, -1.0, 0.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //0
+        let darkgreen_front_bottom = Vertex::new(
+            Vec3::new(phi, 1.0, 0.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //1
+        let darkgreen_back_top = Vertex::new(
+            Vec3::new(-phi, -1.0, 0.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //2
+        let darkgreen_back_bottom = Vertex::new(
+            Vec3::new(-phi, 1.0, 0.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //3
+        let lightgreen_front_right = Vertex::new(
+            Vec3::new(1.0, 0.0, -phi),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //4
+        let lightgreen_front_left = Vertex::new(
+            Vec3::new(-1.0, 0.0, -phi),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //5
+        let lightgreen_back_right = Vertex::new(
+            Vec3::new(1.0, 0.0, phi),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //6
+        let lightgreen_back_left = Vertex::new(
+            Vec3::new(-1.0, 0.0, phi),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //7
+        let purple_top_left = Vertex::new(
+            Vec3::new(0.0, -phi, -1.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //8
+        let purple_top_right = Vertex::new(
+            Vec3::new(0.0, -phi, 1.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //9
+        let purple_bottom_left = Vertex::new(
+            Vec3::new(0.0, phi, -1.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //10
+        let purple_bottom_right = Vertex::new(
+            Vec3::new(0.0, phi, 1.0),
+            Vec3::new(0.5, 0.5, 0.5),
+            Vec2::new(0.5, 0.5),
+        ); //11
+        Model {
+            vertex_data: vec![
+                darkgreen_front_top,
+                darkgreen_front_bottom,
+                darkgreen_back_top,
+                darkgreen_back_bottom,
+                lightgreen_front_right,
+                lightgreen_front_left,
+                lightgreen_back_right,
+                lightgreen_back_left,
+                purple_top_left,
+                purple_top_right,
+                purple_bottom_left,
+                purple_bottom_right,
+            ],
+            index_data: vec![
+                0, 9, 8, //
+                0, 8, 4, //
+                0, 4, 1, //
+                0, 1, 6, //
+                0, 6, 9, //
+                8, 9, 2, //
+                8, 2, 5, //
+                8, 5, 4, //
+                4, 5, 10, //
+                4, 10, 1, //
+                1, 10, 11, //
+                1, 11, 6, //
+                2, 3, 5, //
+                2, 7, 3, //
+                2, 9, 7, //
+                5, 3, 10, //
+                3, 11, 10, //
+                3, 7, 11, //
+                6, 7, 9, //
+                6, 11, 7, //
+            ],
+            handle_to_index: Default::default(),
+            handles: Default::default(),
+            instances: Default::default(),
+            first_invisible: 0,
+            next_handle: 0,
+            vertex_buffer: None,
+            index_buffer: None,
+            instance_buffer: None,
+        }
+    }
+
+    pub fn sphere(refinements: u32) -> Model<Vertex, InstanceData> {
+        let mut model = Model::<Vertex, InstanceData>::icosahedron();
+        for _ in 0..refinements {
+            model.subdivide();
+        }
+        model
     }
 
     pub fn get(&self, handle: usize) -> Option<&I> {
@@ -343,5 +461,67 @@ impl<V, I> Model<V, I> {
                 }
             }
         }
+    }
+}
+
+impl Model<Vertex, InstanceData> {
+    pub fn subdivide(&mut self) {
+        let mut new_indices = vec![];
+        let mut midpoints = HashMap::<(u32, u32), u32>::new();
+        for triangle in self.index_data.chunks(3) {
+            let a = triangle[0];
+            let b = triangle[1];
+            let c = triangle[2];
+            let vert_a = self.vertex_data[a as usize];
+            let vert_b = self.vertex_data[b as usize];
+            let vert_c = self.vertex_data[c as usize];
+
+            let mab = if let Some(ab) = midpoints.get(&(a, b)) {
+                *ab
+            } else {
+                let vert_ab = Vertex::new(
+                    (vert_a.pos + vert_b.pos) * 0.5,
+                    (vert_a.color + vert_b.color) * 0.5,
+                    (vert_a.uv + vert_b.uv) * 0.5,
+                );
+                let mab = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_ab);
+                midpoints.insert((a, b), mab);
+                midpoints.insert((b, a), mab);
+                mab
+            };
+
+            let mbc = if let Some(bc) = midpoints.get(&(b, c)) {
+                *bc
+            } else {
+                let vert_bc = Vertex::new(
+                    (vert_b.pos + vert_c.pos) * 0.5,
+                    (vert_b.color + vert_c.color) * 0.5,
+                    (vert_b.uv + vert_c.uv) * 0.5,
+                );
+                let mbc = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_bc);
+                midpoints.insert((b, c), mbc);
+                midpoints.insert((c, b), mbc);
+                mbc
+            };
+
+            let mca = if let Some(ca) = midpoints.get(&(c, a)) {
+                *ca
+            } else {
+                let vert_ca = Vertex::new(
+                    (vert_c.pos + vert_a.pos) * 0.5,
+                    (vert_c.color + vert_a.color) * 0.5,
+                    (vert_c.uv + vert_a.uv) * 0.5,
+                );
+                let mca = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_ca);
+                midpoints.insert((c, a), mca);
+                midpoints.insert((a, c), mca);
+                mca
+            };
+            new_indices.extend_from_slice(&[mca, a, mab, mab, b, mbc, mbc, c, mca, mab, mbc, mca]);
+        }
+        self.index_data = new_indices;
     }
 }

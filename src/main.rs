@@ -56,49 +56,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut renderer = Renderer::new("My Game Engine", surface, display, is_wayland)?;
 
-    let mut cube = Model::<Vertex, InstanceData>::cube();
-    cube.insert_visibly(InstanceData {
-        model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, 0.05, 0.1))
-            * glm::Mat4::new_scaling(0.1))
-        .into(),
-        color_mod: [1.0, 1.0, 0.2],
-    });
-    cube.insert_visibly(InstanceData {
-        model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, -0.05, 0.5))
-            * glm::Mat4::new_scaling(0.1))
-        .into(),
-        color_mod: [0.2, 0.4, 1.0],
-    });
-    cube.insert_visibly(InstanceData {
-        model_matrix: glm::Mat4::new_scaling(0.1).into(),
-        color_mod: [1.0, 0.0, 0.0],
-    });
-    cube.insert_visibly(InstanceData {
-        model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.25, 0.0))
-            * glm::Mat4::new_scaling(0.1))
-        .into(),
-        color_mod: [0.0, 1.0, 0.0],
-    });
-    cube.insert_visibly(InstanceData {
-        model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-            * glm::Mat4::new_scaling(0.1))
-        .into(),
-        color_mod: [0.0, 1.0, 0.0],
-    });
-    let mut angle = 0.2;
-    let rotating_cube_handle = cube.insert_visibly(InstanceData {
-        model_matrix: (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
-            * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-            * glm::Mat4::new_scaling(0.1))
-        .into(),
-        color_mod: [1.0, 1.0, 1.0],
+    // let mut cube = Model::<Vertex, InstanceData>::cube();
+    // cube.insert_visibly(InstanceData {
+    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, 0.05, 0.1))
+    //         * glm::Mat4::new_scaling(0.1))
+    //     .into(),
+    //     color_mod: [1.0, 1.0, 0.2],
+    // });
+    // cube.insert_visibly(InstanceData {
+    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, -0.05, 0.5))
+    //         * glm::Mat4::new_scaling(0.1))
+    //     .into(),
+    //     color_mod: [0.2, 0.4, 1.0],
+    // });
+    // cube.insert_visibly(InstanceData {
+    //     model_matrix: glm::Mat4::new_scaling(0.1).into(),
+    //     color_mod: [1.0, 0.0, 0.0],
+    // });
+    // cube.insert_visibly(InstanceData {
+    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.25, 0.0))
+    //         * glm::Mat4::new_scaling(0.1))
+    //     .into(),
+    //     color_mod: [0.0, 1.0, 0.0],
+    // });
+    // cube.insert_visibly(InstanceData {
+    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
+    //         * glm::Mat4::new_scaling(0.1))
+    //     .into(),
+    //     color_mod: [0.0, 1.0, 0.0],
+    // });
+    // let mut angle = 0.2;
+    // let rotating_cube_handle = cube.insert_visibly(InstanceData {
+    //     model_matrix: (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
+    //         * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
+    //         * glm::Mat4::new_scaling(0.1))
+    //     .into(),
+    //     color_mod: [1.0, 1.0, 1.0],
+    // });
+
+    let mut sphere = Model::<Vertex,InstanceData>::sphere(3);
+    // let mut sphere = Model::<Vertex,InstanceData>::icosahedron();
+    sphere.insert_visibly(InstanceData {
+        model_matrix: glm::Mat4::new_scaling(0.5).into(),
+        color_mod: [0.5, 0.0, 0.0]
     });
     if let Some(allo) = &mut renderer.allocator {
-        cube.update_vertex_buffer(&renderer.device, allo)?;
-        cube.update_index_buffer(&renderer.device, allo)?;
-        cube.update_instance_buffer(&renderer.device, allo)?;
+        sphere.update_vertex_buffer(&renderer.device, allo)?;
+        sphere.update_index_buffer(&renderer.device, allo)?;
+        sphere.update_instance_buffer(&renderer.device, allo)?;
     }
-    renderer.models = vec![cube];
+    renderer.models = vec![sphere];
 
     let mut camera = Camera::builder().build();
 
@@ -154,14 +161,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return;
             }
             // render here
-            angle += 0.01;
-            renderer.models[0]
-                .get_mut(rotating_cube_handle)
-                .expect("missing instance!")
-                .model_matrix = (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
-                * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-                * glm::Mat4::new_scaling(0.1))
-            .into();
+            // angle += 0.01;
+            // renderer.models[0]
+            //     .get_mut(rotating_cube_handle)
+            //     .expect("missing instance!")
+            //     .model_matrix = (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
+            //     * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
+            //     * glm::Mat4::new_scaling(0.1))
+            // .into();
             renderer
                 .update_uniforms_from_camera(&camera)
                 .expect("Could not update uniform buffer!");
