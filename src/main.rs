@@ -94,12 +94,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //     color_mod: [1.0, 1.0, 1.0],
     // });
 
-    let mut sphere = Model::<Vertex,InstanceData>::sphere(3);
+    let mut sphere = Model::<Vertex, InstanceData>::sphere(3);
     // let mut sphere = Model::<Vertex,InstanceData>::icosahedron();
-    sphere.insert_visibly(InstanceData {
-        model_matrix: glm::Mat4::new_scaling(0.5).into(),
-        color_mod: [0.5, 0.0, 0.0]
-    });
+    sphere.insert_visibly(InstanceData::from_matrix_and_color(
+        glm::Mat4::new_scaling(0.5),
+        glm::Vec3::new(0.5, 0.0, 0.01),
+    ));
     if let Some(allo) = &mut renderer.allocator {
         sphere.update_vertex_buffer(&renderer.device, allo)?;
         sphere.update_index_buffer(&renderer.device, allo)?;

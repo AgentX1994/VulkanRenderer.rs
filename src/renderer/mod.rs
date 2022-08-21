@@ -104,7 +104,18 @@ impl Drop for FrameData {
 #[allow(dead_code)]
 pub struct InstanceData {
     pub model_matrix: [[f32; 4]; 4],
-    pub color_mod: [f32; 3],
+    pub inverse_model_matrix: [[f32; 4]; 4],
+    pub color: [f32; 3],
+}
+
+impl InstanceData {
+    pub fn from_matrix_and_color(model: glm::Mat4, color: glm::Vec3) -> Self {
+        InstanceData {
+            model_matrix: model.into(),
+            inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
+            color: color.into(),
+        }
+    }
 }
 
 pub struct Renderer {
@@ -141,7 +152,7 @@ impl Renderer {
         entry: &ash::Entry,
         layer_names: &[*const i8],
         mut debug_create_info: vk::DebugUtilsMessengerCreateInfoEXT,
-        use_wayland: bool
+        use_wayland: bool,
     ) -> Result<ash::Instance, ash::vk::Result> {
         // TODO Return errors
         let engine_name_c = CString::new(engine_name).unwrap();
@@ -157,13 +168,13 @@ impl Renderer {
 
         let mut instance_extension_names = vec![
             ext::DebugUtils::name().as_ptr(),
-            khr::Surface::name().as_ptr()
+            khr::Surface::name().as_ptr(),
         ];
-        #[cfg(target_os="windows")]
+        #[cfg(target_os = "windows")]
         {
             instance_extension_names.push(khr::Win32Surface::name().as_ptr());
         }
-        #[cfg(target_os="linux")]
+        #[cfg(target_os = "linux")]
         {
             if use_wayland {
                 instance_extension_names.push(khr::WaylandSurface::name().as_ptr());
@@ -402,8 +413,14 @@ impl Renderer {
             )
             .pfn_user_callback(Some(vulkan_debug_utils_callback));
 
-        let instance =
-            Self::create_instance(name, "My Engine", &entry, &layers[..], *debug_create_info, use_wayland)?;
+        let instance = Self::create_instance(
+            name,
+            "My Engine",
+            &entry,
+            &layers[..],
+            *debug_create_info,
+            use_wayland,
+        )?;
 
         // Create debug messenger
         let debug_utils = ext::DebugUtils::new(&entry, &instance);
