@@ -8,13 +8,28 @@ use super::InstanceData;
 #[derive(Debug, Default, Copy, Clone)]
 pub struct Vertex {
     pub pos: Vec3,
+    pub normal: Vec3,
     pub color: Vec3,
     pub uv: Vec2,
 }
 
 impl Vertex {
-    pub fn new(pos: Vec3, color: Vec3, uv: Vec2) -> Self {
-        Vertex { pos, color, uv }
+    pub fn new(pos: Vec3, normal: Vec3, color: Vec3, uv: Vec2) -> Self {
+        Vertex {
+            pos,
+            normal,
+            color,
+            uv,
+        }
+    }
+
+    pub fn midpoint(a: &Vertex, b: &Vertex) -> Self {
+        Vertex {
+            pos: 0.5 * (a.pos + b.pos),
+            normal: 0.5 * (a.normal + b.normal),
+            color: 0.5 * (a.color + b.color),
+            uv: 0.5 * (a.uv + b.uv),
+        }
     }
 
     pub fn get_binding_description() -> [vk::VertexInputBindingDescription; 2] {
@@ -32,7 +47,7 @@ impl Vertex {
         ]
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 8] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 9] {
         [
             vk::VertexInputAttributeDescription {
                 location: 0,
@@ -44,40 +59,46 @@ impl Vertex {
                 location: 1,
                 binding: 0,
                 format: vk::Format::R32G32B32_SFLOAT,
-                offset: offset_of!(Vertex, color) as u32,
+                offset: offset_of!(Vertex, normal) as u32,
             },
             vk::VertexInputAttributeDescription {
                 location: 2,
+                binding: 0,
+                format: vk::Format::R32G32B32_SFLOAT,
+                offset: offset_of!(Vertex, color) as u32,
+            },
+            vk::VertexInputAttributeDescription {
+                location: 3,
                 binding: 0,
                 format: vk::Format::R32G32_SFLOAT,
                 offset: offset_of!(Vertex, uv) as u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 3,
+                location: 4,
                 binding: 1,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: 0u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 4,
+                location: 5,
                 binding: 1,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: 16u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 5,
+                location: 6,
                 binding: 1,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: 32u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 6,
+                location: 7,
                 binding: 1,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: 48u32,
             },
             vk::VertexInputAttributeDescription {
-                location: 7,
+                location: 8,
                 binding: 1,
                 format: vk::Format::R32G32B32_SFLOAT,
                 offset: 64u32,

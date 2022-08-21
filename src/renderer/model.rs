@@ -40,42 +40,51 @@ pub struct Model<V, I> {
 
 impl<V, I> Model<V, I> {
     pub fn cube() -> Model<Vertex, InstanceData> {
+        // TODO Fix normals?
         let lbf = Vertex::new(
+            Vec3::new(-1.0, 1.0, -1.0),
             Vec3::new(-1.0, 1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //lbf: left-bottom-front
         let lbb = Vertex::new(
             Vec3::new(-1.0, 1.0, 1.0),
+            Vec3::new(-1.0, 1.0, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let ltf = Vertex::new(
+            Vec3::new(-1.0, -1.0, -1.0),
             Vec3::new(-1.0, -1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let ltb = Vertex::new(
             Vec3::new(-1.0, -1.0, 1.0),
+            Vec3::new(-1.0, -1.0, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rbf = Vertex::new(
+            Vec3::new(1.0, 1.0, -1.0),
             Vec3::new(1.0, 1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rbb = Vertex::new(
             Vec3::new(1.0, 1.0, 1.0),
+            Vec3::new(1.0, 1.0, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rtf = Vertex::new(
             Vec3::new(1.0, -1.0, -1.0),
+            Vec3::new(1.0, -1.0, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rtb = Vertex::new(
+            Vec3::new(1.0, -1.0, 1.0),
             Vec3::new(1.0, -1.0, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
@@ -105,60 +114,72 @@ impl<V, I> Model<V, I> {
         let phi = (1.0 + 5.0_f32.sqrt()) / 2.0;
         let darkgreen_front_top = Vertex::new(
             Vec3::new(phi, -1.0, 0.0),
+            Vec3::new(phi, -1.0, 0.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //0
         let darkgreen_front_bottom = Vertex::new(
+            Vec3::new(phi, 1.0, 0.0),
             Vec3::new(phi, 1.0, 0.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //1
         let darkgreen_back_top = Vertex::new(
             Vec3::new(-phi, -1.0, 0.0),
+            Vec3::new(-phi, -1.0, 0.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //2
         let darkgreen_back_bottom = Vertex::new(
+            Vec3::new(-phi, 1.0, 0.0),
             Vec3::new(-phi, 1.0, 0.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //3
         let lightgreen_front_right = Vertex::new(
             Vec3::new(1.0, 0.0, -phi),
+            Vec3::new(1.0, 0.0, -phi),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //4
         let lightgreen_front_left = Vertex::new(
+            Vec3::new(-1.0, 0.0, -phi),
             Vec3::new(-1.0, 0.0, -phi),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //5
         let lightgreen_back_right = Vertex::new(
             Vec3::new(1.0, 0.0, phi),
+            Vec3::new(1.0, 0.0, phi),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //6
         let lightgreen_back_left = Vertex::new(
+            Vec3::new(-1.0, 0.0, phi),
             Vec3::new(-1.0, 0.0, phi),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //7
         let purple_top_left = Vertex::new(
             Vec3::new(0.0, -phi, -1.0),
+            Vec3::new(0.0, -phi, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //8
         let purple_top_right = Vertex::new(
+            Vec3::new(0.0, -phi, 1.0),
             Vec3::new(0.0, -phi, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //9
         let purple_bottom_left = Vertex::new(
             Vec3::new(0.0, phi, -1.0),
+            Vec3::new(0.0, phi, -1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //10
         let purple_bottom_right = Vertex::new(
+            Vec3::new(0.0, phi, 1.0),
             Vec3::new(0.0, phi, 1.0),
             Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
@@ -483,11 +504,7 @@ impl Model<Vertex, InstanceData> {
             let mab = if let Some(ab) = midpoints.get(&(a, b)) {
                 *ab
             } else {
-                let vert_ab = Vertex::new(
-                    (vert_a.pos + vert_b.pos) * 0.5,
-                    (vert_a.color + vert_b.color) * 0.5,
-                    (vert_a.uv + vert_b.uv) * 0.5,
-                );
+                let vert_ab = Vertex::midpoint(&vert_a, &vert_b);
                 let mab = self.vertex_data.len() as u32;
                 self.vertex_data.push(vert_ab);
                 midpoints.insert((a, b), mab);
@@ -498,11 +515,7 @@ impl Model<Vertex, InstanceData> {
             let mbc = if let Some(bc) = midpoints.get(&(b, c)) {
                 *bc
             } else {
-                let vert_bc = Vertex::new(
-                    (vert_b.pos + vert_c.pos) * 0.5,
-                    (vert_b.color + vert_c.color) * 0.5,
-                    (vert_b.uv + vert_c.uv) * 0.5,
-                );
+                let vert_bc = Vertex::midpoint(&vert_b, &vert_c);
                 let mbc = self.vertex_data.len() as u32;
                 self.vertex_data.push(vert_bc);
                 midpoints.insert((b, c), mbc);
@@ -513,11 +526,7 @@ impl Model<Vertex, InstanceData> {
             let mca = if let Some(ca) = midpoints.get(&(c, a)) {
                 *ca
             } else {
-                let vert_ca = Vertex::new(
-                    (vert_c.pos + vert_a.pos) * 0.5,
-                    (vert_c.color + vert_a.color) * 0.5,
-                    (vert_c.uv + vert_a.uv) * 0.5,
-                );
+                let vert_ca = Vertex::midpoint(&vert_c, &vert_a);
                 let mca = self.vertex_data.len() as u32;
                 self.vertex_data.push(vert_ca);
                 midpoints.insert((c, a), mca);
