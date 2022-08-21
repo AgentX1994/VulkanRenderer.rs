@@ -44,49 +44,41 @@ impl<V, I> Model<V, I> {
         let lbf = Vertex::new(
             Vec3::new(-1.0, 1.0, -1.0),
             Vec3::new(-1.0, 1.0, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //lbf: left-bottom-front
         let lbb = Vertex::new(
             Vec3::new(-1.0, 1.0, 1.0),
             Vec3::new(-1.0, 1.0, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let ltf = Vertex::new(
             Vec3::new(-1.0, -1.0, -1.0),
             Vec3::new(-1.0, -1.0, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let ltb = Vertex::new(
             Vec3::new(-1.0, -1.0, 1.0),
             Vec3::new(-1.0, -1.0, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rbf = Vertex::new(
             Vec3::new(1.0, 1.0, -1.0),
             Vec3::new(1.0, 1.0, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rbb = Vertex::new(
             Vec3::new(1.0, 1.0, 1.0),
             Vec3::new(1.0, 1.0, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rtf = Vertex::new(
             Vec3::new(1.0, -1.0, -1.0),
             Vec3::new(1.0, -1.0, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         let rtb = Vertex::new(
             Vec3::new(1.0, -1.0, 1.0),
             Vec3::new(1.0, -1.0, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         );
         Model {
@@ -115,73 +107,61 @@ impl<V, I> Model<V, I> {
         let darkgreen_front_top = Vertex::new(
             Vec3::new(phi, -1.0, 0.0),
             Vec3::new(phi, -1.0, 0.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //0
         let darkgreen_front_bottom = Vertex::new(
             Vec3::new(phi, 1.0, 0.0),
             Vec3::new(phi, 1.0, 0.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //1
         let darkgreen_back_top = Vertex::new(
             Vec3::new(-phi, -1.0, 0.0),
             Vec3::new(-phi, -1.0, 0.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //2
         let darkgreen_back_bottom = Vertex::new(
             Vec3::new(-phi, 1.0, 0.0),
             Vec3::new(-phi, 1.0, 0.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //3
         let lightgreen_front_right = Vertex::new(
             Vec3::new(1.0, 0.0, -phi),
             Vec3::new(1.0, 0.0, -phi),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //4
         let lightgreen_front_left = Vertex::new(
             Vec3::new(-1.0, 0.0, -phi),
             Vec3::new(-1.0, 0.0, -phi),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //5
         let lightgreen_back_right = Vertex::new(
             Vec3::new(1.0, 0.0, phi),
             Vec3::new(1.0, 0.0, phi),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //6
         let lightgreen_back_left = Vertex::new(
             Vec3::new(-1.0, 0.0, phi),
             Vec3::new(-1.0, 0.0, phi),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //7
         let purple_top_left = Vertex::new(
             Vec3::new(0.0, -phi, -1.0),
             Vec3::new(0.0, -phi, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //8
         let purple_top_right = Vertex::new(
             Vec3::new(0.0, -phi, 1.0),
             Vec3::new(0.0, -phi, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //9
         let purple_bottom_left = Vertex::new(
             Vec3::new(0.0, phi, -1.0),
             Vec3::new(0.0, phi, -1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //10
         let purple_bottom_right = Vertex::new(
             Vec3::new(0.0, phi, 1.0),
             Vec3::new(0.0, phi, 1.0),
-            Vec3::new(0.5, 0.5, 0.5),
             Vec2::new(0.5, 0.5),
         ); //11
         Model {
