@@ -150,6 +150,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             winit::event::VirtualKeyCode::PageDown => {
                 camera.turn_down(0.02);
             }
+            winit::event::VirtualKeyCode::F12 => {
+                renderer.screenshot().expect("Could not take screenshot");
+                println!("Screenshotted!");
+            }
             _ => {}
         },
         Event::MainEventsCleared => {

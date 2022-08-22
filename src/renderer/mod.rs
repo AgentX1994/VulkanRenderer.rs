@@ -11,7 +11,7 @@ use ash::{Device, Instance};
 use gpu_allocator::MemoryLocation;
 use nalgebra_glm as glm;
 
-use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
+use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc};
 
 mod buffer;
 pub mod camera;
@@ -762,6 +762,296 @@ impl Renderer {
         } else {
             panic!("No allocator!");
         }
+    }
+
+    pub fn screenshot(&mut self) -> VkResult<()> {
+        let command_buffer_alloc_info = vk::CommandBufferAllocateInfo::builder()
+            .command_pool(self.graphics_command_pool)
+            .command_buffer_count(1);
+        let copy_buffer = unsafe {
+            self.device
+                .allocate_command_buffers(&command_buffer_alloc_info)
+        }?[0];
+
+        let cmd_begin_info = vk::CommandBufferBeginInfo::builder()
+            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+        unsafe {
+            self.device
+                .begin_command_buffer(copy_buffer, &cmd_begin_info)
+        }?;
+
+        let image_create_info = vk::ImageCreateInfo::builder()
+            .format(vk::Format::R8G8B8A8_UNORM)
+            .image_type(vk::ImageType::TYPE_2D)
+            .extent(vk::Extent3D {
+                width: self.swapchain.get_extent().width,
+                height: self.swapchain.get_extent().height,
+                depth: 1,
+            })
+            .array_layers(1)
+            .mip_levels(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::LINEAR)
+            .usage(vk::ImageUsageFlags::TRANSFER_DST)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+
+        let dest_image = unsafe { self.device.create_image(&image_create_info, None) }?;
+        let reqs = unsafe { self.device.get_image_memory_requirements(dest_image) };
+
+        let dest_image_allocation = if let Some(allocator) = &mut self.allocator {
+            allocator
+                .allocate(&AllocationCreateDesc {
+                    name: "dest_image",
+                    requirements: reqs,
+                    location: MemoryLocation::GpuToCpu,
+                    linear: false,
+                })
+                .unwrap() // TODO error handling.
+        } else {
+            panic!("No allocator!");
+        };
+        unsafe {
+            self.device.bind_image_memory(
+                dest_image,
+                dest_image_allocation.memory(),
+                dest_image_allocation.offset(),
+            )?;
+        };
+
+        // Transition layouts of source and destination
+        {
+            let barrier = vk::ImageMemoryBarrier::builder()
+                .image(dest_image)
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .build();
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    copy_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
+            }
+        }
+        let source_image = self.swapchain.get_images()[self.current_image];
+        {
+            let barrier = vk::ImageMemoryBarrier::builder()
+                .image(source_image)
+                .src_access_mask(vk::AccessFlags::MEMORY_READ)
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                .old_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .build();
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    copy_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
+            }
+        }
+
+        // Now copy the image
+        let zero_offset = vk::Offset3D::default();
+        let copy_area = vk::ImageCopy::builder()
+            .src_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .src_offset(zero_offset)
+            .dst_subresource(vk::ImageSubresourceLayers {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                mip_level: 0,
+                base_array_layer: 0,
+                layer_count: 1,
+            })
+            .dst_offset(zero_offset)
+            .extent(vk::Extent3D {
+                width: self.swapchain.get_extent().width,
+                height: self.swapchain.get_extent().height,
+                depth: 1,
+            })
+            .build();
+        unsafe {
+            self.device.cmd_copy_image(
+                copy_buffer,
+                source_image,
+                vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                dest_image,
+                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                &[copy_area],
+            );
+        }
+        // Restore the layouts of the images
+        {
+            let barrier = vk::ImageMemoryBarrier::builder()
+                .image(dest_image)
+                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .dst_access_mask(vk::AccessFlags::MEMORY_READ)
+                .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .new_layout(vk::ImageLayout::GENERAL)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .build();
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    copy_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
+            }
+        }
+        {
+            let barrier = vk::ImageMemoryBarrier::builder()
+                .image(source_image)
+                .src_access_mask(vk::AccessFlags::TRANSFER_READ)
+                .dst_access_mask(vk::AccessFlags::MEMORY_READ)
+                .old_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+                .build();
+            unsafe {
+                self.device.cmd_pipeline_barrier(
+                    copy_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[barrier],
+                );
+            }
+        }
+
+        unsafe {
+            self.device.end_command_buffer(copy_buffer)?;
+        }
+
+        let submit_infos = [vk::SubmitInfo::builder()
+            .command_buffers(&[copy_buffer])
+            .build()];
+        let fence = unsafe {
+            self.device
+                .create_fence(&vk::FenceCreateInfo::default(), None)
+        }?;
+        unsafe {
+            self.device
+                .queue_submit(self.graphics_queue, &submit_infos, fence)
+        }?;
+
+        unsafe { self.device.wait_for_fences(&[fence], true, std::u64::MAX) }?;
+
+        unsafe { self.device.destroy_fence(fence, None) };
+        unsafe {
+            self.device
+                .free_command_buffers(self.graphics_command_pool, &[copy_buffer])
+        };
+
+        let mut data = {
+            let source_ptr = dest_image_allocation
+                .mapped_ptr()
+                .expect("No mapped memory for image")
+                .as_ptr() as *mut u8;
+
+            let subresource_layout = unsafe {
+                self.device.get_image_subresource_layout(
+                    dest_image,
+                    vk::ImageSubresource {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        array_layer: 0,
+                    },
+                )
+            };
+
+            let mut data = Vec::<u8>::with_capacity(subresource_layout.size as usize);
+            unsafe {
+                std::ptr::copy(
+                    source_ptr,
+                    data.as_mut_ptr(),
+                    subresource_layout.size as usize,
+                );
+                data.set_len(subresource_layout.size as usize);
+            }
+            if let Some(allo) = &mut self.allocator {
+                allo.free(dest_image_allocation)
+                    .expect("Could not free dest image");
+            }
+            unsafe {
+                self.device.destroy_image(dest_image, None);
+            }
+            data
+        };
+
+        // The data that comes out might not be in RGBA8 format, so we have to convert it.
+        match self.swapchain.get_image_format().format {
+            vk::Format::B8G8R8A8_UNORM | vk::Format::B8G8R8A8_SRGB => {
+                for v in data.chunks_mut(4) {
+                    // BGRA -> RGBA involves swapping B and R (0 and 2)
+                    v.swap(0, 2);
+                }
+            }
+            vk::Format::R8G8B8A8_UNORM => {} // Nothing to do
+            _ => panic!(
+                "No way to convert this format! {:?}",
+                self.swapchain.get_image_format().format
+            ),
+        }
+
+        let screen: image::ImageBuffer<image::Rgba<u8>, _> = image::ImageBuffer::from_raw(
+            self.swapchain.get_extent().width,
+            self.swapchain.get_extent().height,
+            data,
+        )
+        .expect("ImageBuffer creation");
+
+        let screen_image = image::DynamicImage::ImageRgba8(screen);
+        screen_image
+            .save("screenshot.jpg")
+            .expect("Could not save screenshot");
+
+        Ok(())
     }
 }
 
