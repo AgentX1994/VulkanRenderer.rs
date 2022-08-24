@@ -15,7 +15,7 @@ use nalgebra_glm as glm;
 use vulkan_rust::renderer::model::Model;
 use vulkan_rust::renderer::vertex::Vertex;
 use vulkan_rust::renderer::InstanceData;
-use vulkan_rust::renderer::Renderer;
+use vulkan_rust::renderer::{Renderer, RendererError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -164,7 +164,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             renderer
                 .update_uniforms_from_camera(&camera)
                 .expect("Could not update uniform buffer!");
-            renderer.render().expect("Could not render frame!");
+            let result = renderer.render();
+            match result {
+                Ok(_) => {},
+                Err(RendererError::VulkanError(ash::vk::Result::ERROR_OUT_OF_DATE_KHR)) => {} // Resize request will update swapchain
+                _ => result.expect("render error")
+            }
         }
         _ => {}
     });
