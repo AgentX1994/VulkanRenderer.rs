@@ -4,6 +4,7 @@ use std::ffi::c_void;
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
 use vulkan_rust::renderer::camera::Camera;
+use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 
 #[cfg(not(target_os = "windows"))]
@@ -20,7 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     // Create window
     let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::Window::new(&event_loop)?;
+    let window = winit::window::WindowBuilder::new()
+        .with_inner_size(PhysicalSize::new(800, 600))
+        .build(&event_loop)?;
 
     // Get display and Window
     #[cfg(not(target_os = "windows"))]
@@ -54,48 +57,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             panic!("Could not setup window");
         }
     };
-    let mut renderer = Renderer::new("My Game Engine", surface, display, is_wayland)?;
-
-    // let mut cube = Model::<Vertex, InstanceData>::cube();
-    // cube.insert_visibly(InstanceData {
-    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, 0.05, 0.1))
-    //         * glm::Mat4::new_scaling(0.1))
-    //     .into(),
-    //     color_mod: [1.0, 1.0, 0.2],
-    // });
-    // cube.insert_visibly(InstanceData {
-    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.05, -0.05, 0.5))
-    //         * glm::Mat4::new_scaling(0.1))
-    //     .into(),
-    //     color_mod: [0.2, 0.4, 1.0],
-    // });
-    // cube.insert_visibly(InstanceData {
-    //     model_matrix: glm::Mat4::new_scaling(0.1).into(),
-    //     color_mod: [1.0, 0.0, 0.0],
-    // });
-    // cube.insert_visibly(InstanceData {
-    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.25, 0.0))
-    //         * glm::Mat4::new_scaling(0.1))
-    //     .into(),
-    //     color_mod: [0.0, 1.0, 0.0],
-    // });
-    // cube.insert_visibly(InstanceData {
-    //     model_matrix: (glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-    //         * glm::Mat4::new_scaling(0.1))
-    //     .into(),
-    //     color_mod: [0.0, 1.0, 0.0],
-    // });
-    // let mut angle = 0.2;
-    // let rotating_cube_handle = cube.insert_visibly(InstanceData {
-    //     model_matrix: (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
-    //         * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-    //         * glm::Mat4::new_scaling(0.1))
-    //     .into(),
-    //     color_mod: [1.0, 1.0, 1.0],
-    // });
+    let window_size = window.inner_size();
+    let mut renderer = Renderer::new(
+        "My Game Engine",
+        window_size.width,
+        window_size.height,
+        surface,
+        display,
+        is_wayland,
+    )?;
 
     let mut sphere = Model::<Vertex, InstanceData>::sphere(3);
-    // let mut sphere = Model::<Vertex,InstanceData>::icosahedron();
+
     sphere.insert_visibly(InstanceData::from_matrix_and_color(
         glm::Mat4::new_scaling(0.5),
         glm::Vec3::new(0.5, 0.0, 0.01),
@@ -112,6 +85,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Run event loop
     let mut running = true;
     event_loop.run(move |event, _, controlflow| match event {
+        Event::WindowEvent {
+            event: WindowEvent::Resized(
+                size,
+            ),
+            ..
+        } => {
+            renderer.recreate_swapchain(size.width, size.height).expect("Recreate Swapchain");
+            camera.set_aspect(
+                size.width as f32 / size.height as f32
+            );
+            renderer.update_uniforms_from_camera(&camera).expect("camera buffer update");
+        }
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
             ..
@@ -153,6 +138,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             winit::event::VirtualKeyCode::F12 => {
                 renderer.screenshot().expect("Could not take screenshot");
                 println!("Screenshotted!");
+            }
+            winit::event::VirtualKeyCode::Space => {
+                println!("Window Size: {:?}", window.inner_size());
             }
             _ => {}
         },

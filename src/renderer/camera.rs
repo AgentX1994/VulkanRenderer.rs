@@ -182,6 +182,11 @@ impl Camera {
         self.turn_up(-angle);
     }
 
+    pub fn set_aspect(&mut self, ratio: f32) {
+        self.aspect = ratio;
+        self.update_projection_matrix();
+    }
+
     pub(crate) fn update_buffer(
         &self,
         allocator: &mut Allocator,

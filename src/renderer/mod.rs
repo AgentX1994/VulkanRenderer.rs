@@ -73,6 +73,11 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
     p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
     _p_user_data: *mut c_void,
 ) -> vk::Bool32 {
+    if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
+        || message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+    {
+        return vk::FALSE;
+    }
     let message = CStr::from_ptr((*p_callback_data).p_message);
     let severity = format!("{:?}", message_severity).to_lowercase();
     let ty = format!("{:?}", message_type).to_lowercase();
@@ -123,7 +128,7 @@ pub struct Renderer {
     _entry: ash::Entry,
     pub allocator: Option<Allocator>,
     instance: Instance,
-    _physical_device: vk::PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     pub device: Device,
     debug_utils: ext::DebugUtils,
     utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -132,10 +137,12 @@ pub struct Renderer {
     swapchain: Swapchain,
     framebuffers: Vec<vk::Framebuffer>,
     render_pass: vk::RenderPass,
+    shader_module: ShaderModule,
     graphics_pipeline: GraphicsPipeline,
     graphics_command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     graphics_queue: vk::Queue,
+    graphics_queue_index: u32,
     frame_data: Vec<FrameData>,
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
@@ -388,6 +395,8 @@ impl Renderer {
 
     pub fn new(
         name: &str,
+        window_width: u32,
+        window_height: u32,
         surface: *mut c_void,
         display: *mut c_void,
         use_wayland: bool,
@@ -492,6 +501,8 @@ impl Renderer {
             &surface_loader,
             graphics_queue_index,
             &mut allocator,
+            window_width,
+            window_height,
         )?;
 
         let render_pass = Self::create_render_pass(&device, &swapchain.get_image_format())?;
@@ -591,7 +602,7 @@ impl Renderer {
             _entry: entry,
             instance,
             allocator: Some(allocator),
-            _physical_device: physical_device,
+            physical_device,
             device,
             debug_utils,
             utils_messenger,
@@ -602,8 +613,10 @@ impl Renderer {
             command_buffers,
             render_pass,
             framebuffers,
+            shader_module,
             graphics_pipeline,
             graphics_queue,
+            graphics_queue_index,
             frame_data,
             images_in_flight,
             current_image: 0,
@@ -612,6 +625,49 @@ impl Renderer {
             descriptor_sets,
             models: vec![],
         })
+    }
+
+    pub fn recreate_swapchain(&mut self, width: u32, height: u32) -> VkResult<()> {
+        unsafe {
+            self.device.device_wait_idle()?;
+        }
+        if let Some(allo) = &mut self.allocator {
+            unsafe {
+                for fb in self.framebuffers.iter() {
+                    self.device.destroy_framebuffer(*fb, None);
+                }
+            }
+            self.framebuffers.clear();
+            self.swapchain.destroy(allo);
+            self.swapchain = Swapchain::new(
+                &self.instance,
+                &self.physical_device,
+                &self.device,
+                &self.surface,
+                &self.surface_loader,
+                self.graphics_queue_index,
+                allo,
+                width,
+                height,
+            )?;
+            self.framebuffers = Self::create_framebuffers(
+                &self.device,
+                self.swapchain.get_image_views(),
+                self.swapchain.get_depth_image_view(),
+                self.swapchain.get_extent(),
+                &self.render_pass,
+            )?;
+            self.graphics_pipeline.destroy();
+            self.graphics_pipeline = GraphicsPipeline::new(
+                &self.device,
+                self.swapchain.get_extent(),
+                &self.render_pass,
+                self.shader_module.get_stages(),
+                &Vertex::get_attribute_descriptions(),
+                &Vertex::get_binding_description(),
+            )?;
+        }
+        Ok(())
     }
 
     fn wait_for_next_frame_fence(&self) -> VkResult<()> {
@@ -1093,6 +1149,7 @@ impl Drop for Renderer {
             self.device.destroy_render_pass(self.render_pass, None);
             self.swapchain.destroy(&mut allocator);
             self.surface_loader.destroy_surface(self.surface, None);
+            self.shader_module.destroy();
             drop(allocator); // Ensure all memory is freed
             self.device.destroy_device(None);
             self.debug_utils

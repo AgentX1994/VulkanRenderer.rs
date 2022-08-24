@@ -47,11 +47,8 @@ impl ShaderModule {
     pub fn get_stages(&self) -> &[vk::PipelineShaderStageCreateInfo] {
         &self.stages[..]
     }
-}
 
-impl Drop for ShaderModule {
-    fn drop(&mut self) {
-        // Clean up shaders, not needed after the pipeline is created
+    pub fn destroy(&self) {
         unsafe {
             self.device
                 .destroy_shader_module(self.frag_shader_module, None);

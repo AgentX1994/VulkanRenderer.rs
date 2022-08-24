@@ -59,6 +59,8 @@ impl Swapchain {
         surface_loader: &khr::Surface,
         graphics_queue_index: u32,
         allocator: &mut Allocator,
+        width: u32,
+        height: u32
     ) -> VkResult<Self> {
         // Get capabilities of the surface
         let surface_capabilities = unsafe {
@@ -79,16 +81,12 @@ impl Swapchain {
             })
             .ok_or(vk::Result::ERROR_FORMAT_NOT_SUPPORTED)?;
         let extent = vk::Extent2D {
-            width: surface_capabilities
-                .current_extent
-                .width
-                .min(surface_capabilities.min_image_extent.width)
-                .max(surface_capabilities.max_image_extent.width),
-            height: surface_capabilities
-                .current_extent
-                .height
-                .min(surface_capabilities.min_image_extent.height)
-                .max(surface_capabilities.max_image_extent.height),
+            width: width
+                .min(surface_capabilities.max_image_extent.width)
+                .max(surface_capabilities.min_image_extent.width),
+            height: height
+                .min(surface_capabilities.max_image_extent.height)
+                .max(surface_capabilities.min_image_extent.height),
         };
         let queue_families = [graphics_queue_index];
         let min_image_count = 3.min(surface_capabilities.min_image_count).max(
