@@ -151,6 +151,15 @@ impl Camera {
         );
     }
 
+    pub fn move_up(&mut self, distance: f32) {
+        self.position += distance * -self.down_direction.as_ref();
+        self.update_view_matrix();
+    }
+
+    pub fn move_down(&mut self, distance: f32) {
+        self.move_up(-distance);
+    }
+
     pub fn move_forward(&mut self, distance: f32) {
         self.position += distance * self.view_direction.as_ref();
         self.update_view_matrix();
@@ -158,6 +167,16 @@ impl Camera {
 
     pub fn move_backward(&mut self, distance: f32) {
         self.move_forward(-distance);
+    }
+
+    pub fn move_right(&mut self, distance: f32) {
+        let right = na::Unit::new_normalize(self.down_direction.cross(&self.view_direction));
+        self.position += distance * right.as_ref();
+        self.update_view_matrix();
+    }
+
+    pub fn move_left(&mut self, distance: f32) {
+        self.move_right(-distance);
     }
 
     pub fn turn_right(&mut self, angle: f32) {

@@ -83,6 +83,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut camera = Camera::builder().build();
 
+    let mut move_up_pressed = false;
+    let mut move_down_pressed = false;
+    let mut move_forward_pressed = false;
+    let mut move_backward_pressed = false;
+    let mut move_right_pressed = false;
+    let mut move_left_pressed = false;
+    let mut turn_up_pressed = false;
+    let mut turn_down_pressed = false;
+    let mut turn_right_pressed = false;
+    let mut turn_left_pressed = false;
+
     // Run event loop
     let mut running = true;
     event_loop.run(move |event, _, controlflow| match event {
@@ -110,7 +121,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 WindowEvent::KeyboardInput {
                     input:
                         winit::event::KeyboardInput {
-                            state: winit::event::ElementState::Pressed,
+                            state: pressed,
                             virtual_keycode: Some(keycode),
                             ..
                         },
@@ -118,30 +129,69 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             ..
         } => match keycode {
-            winit::event::VirtualKeyCode::Right => {
-                camera.turn_right(0.1);
+            winit::event::VirtualKeyCode::Space => {
+                move_up_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
-            winit::event::VirtualKeyCode::Left => {
-                camera.turn_left(0.1);
+            winit::event::VirtualKeyCode::C => {
+                move_down_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
-            winit::event::VirtualKeyCode::Up => {
-                camera.move_forward(0.1);
+            winit::event::VirtualKeyCode::W => {
+                move_forward_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
-            winit::event::VirtualKeyCode::Down => {
-                camera.move_backward(0.1);
+            winit::event::VirtualKeyCode::S => {
+                move_backward_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
-            winit::event::VirtualKeyCode::PageUp => {
-                camera.turn_up(0.02);
+            winit::event::VirtualKeyCode::A => {
+                move_left_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
-            winit::event::VirtualKeyCode::PageDown => {
-                camera.turn_down(0.02);
+            winit::event::VirtualKeyCode::D => {
+                move_right_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
+            }
+            winit::event::VirtualKeyCode::E => {
+                turn_right_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
+            }
+            winit::event::VirtualKeyCode::Q => {
+                 turn_left_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
+            }
+            winit::event::VirtualKeyCode::R => {
+                turn_up_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
+            }
+            winit::event::VirtualKeyCode::F => {
+                turn_down_pressed = match pressed {
+                    winit::event::ElementState::Pressed => true,
+                    winit::event::ElementState::Released => false,
+                };
             }
             winit::event::VirtualKeyCode::F12 => {
                 renderer.screenshot().expect("Could not take screenshot");
                 println!("Screenshotted!");
-            }
-            winit::event::VirtualKeyCode::Space => {
-                println!("Window Size: {:?}", window.inner_size());
             }
             _ => {}
         },
@@ -152,6 +202,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Event::RedrawRequested(_) => {
             if !running {
                 return;
+            }
+            const MOVE_SPEED: f32 = 0.05f32;
+            const TURN_SPEED: f32 = 0.005f32;
+            if move_up_pressed {
+                camera.move_up(MOVE_SPEED);
+            }
+            if move_down_pressed {
+                camera.move_down(MOVE_SPEED);
+            }
+            if move_forward_pressed {
+                camera.move_forward(MOVE_SPEED);
+            }
+            if move_backward_pressed {
+                camera.move_backward(MOVE_SPEED);
+            }
+            if move_right_pressed {
+                camera.move_right(MOVE_SPEED);
+            }
+            if move_left_pressed {
+                camera.move_left(MOVE_SPEED);
+            }
+            if turn_up_pressed {
+                camera.turn_up(TURN_SPEED);
+            }
+            if turn_down_pressed {
+                camera.turn_down(TURN_SPEED);
+            }
+            if turn_right_pressed {
+                camera.turn_right(TURN_SPEED);
+            }
+            if turn_left_pressed {
+                camera.turn_left(TURN_SPEED);
             }
             renderer
                 .update_uniforms_from_camera(&camera)
