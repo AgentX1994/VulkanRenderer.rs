@@ -71,7 +71,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     sphere.insert_visibly(InstanceData::from_matrix_and_color(
         glm::Mat4::new_scaling(0.5),
-        glm::Vec3::new(0.5, 0.0, 0.01),
+        //glm::Vec3::new(0.5, 0.0, 0.01),
+        glm::Vec3::new(0.955, 0.638, 0.538),
     ));
     if let Some(allo) = &mut renderer.allocator {
         sphere.update_vertex_buffer(&renderer.device, allo)?;
