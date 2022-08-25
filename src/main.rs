@@ -152,15 +152,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !running {
                 return;
             }
-            // render here
-            // angle += 0.01;
-            // renderer.models[0]
-            //     .get_mut(rotating_cube_handle)
-            //     .expect("missing instance!")
-            //     .model_matrix = (glm::Mat4::from_scaled_axis(glm::Vec3::new(0.0, 0.0, angle))
-            //     * glm::Mat4::new_translation(&glm::Vec3::new(0.0, 0.5, 0.0))
-            //     * glm::Mat4::new_scaling(0.1))
-            // .into();
             renderer
                 .update_uniforms_from_camera(&camera)
                 .expect("Could not update uniform buffer!");
