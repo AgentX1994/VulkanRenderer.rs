@@ -4,12 +4,14 @@ use std::ffi::c_void;
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
 use vulkan_rust::renderer::camera::Camera;
+use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 
 #[cfg(not(target_os = "windows"))]
 use winit::platform::unix::WindowExtUnix;
 
+use nalgebra as na;
 use nalgebra_glm as glm;
 
 use vulkan_rust::renderer::model::Model;
@@ -69,17 +71,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut sphere = Model::<Vertex, InstanceData>::sphere(3);
 
-    sphere.insert_visibly(InstanceData::from_matrix_and_color(
-        glm::Mat4::new_scaling(0.5),
-        //glm::Vec3::new(0.5, 0.0, 0.01),
-        glm::Vec3::new(0.955, 0.638, 0.538),
-    ));
+    for i in 0..10 {
+        for j in 0..10 {
+            sphere.insert_visibly(InstanceData::new(
+                glm::Mat4::new_translation(&glm::Vec3::new(i as f32 - 5., j as f32 + 5., 10.0))
+                    * glm::Mat4::new_scaling(0.5),
+                glm::vec3(0.0, 0.0, 0.8),
+                i as f32 * 0.1,
+                j as f32 * 0.1,
+            ));
+        }
+    }
     if let Some(allo) = &mut renderer.allocator {
         sphere.update_vertex_buffer(&renderer.device, allo)?;
         sphere.update_index_buffer(&renderer.device, allo)?;
         sphere.update_instance_buffer(&renderer.device, allo)?;
     }
     renderer.models = vec![sphere];
+
+    let mut lights = LightManager::default();
+    lights.add_light(DirectionalLight {
+        direction: na::Unit::new_normalize(glm::Vec3::new(-1., -1., 0.)),
+        illuminance: glm::Vec3::new(10.1, 10.1, 10.1),
+    });
+    lights.add_light(PointLight {
+        position: na::Point3::new(0.1, -3.0, -3.0),
+        luminous_flux: glm::Vec3::new(100.0, 100.0, 100.0),
+    });
+    lights.add_light(PointLight {
+        position: na::Point3::new(1.5, 0.0, 0.0),
+        luminous_flux: glm::Vec3::new(10.0, 10.0, 10.0),
+    });
+    lights.add_light(PointLight {
+        position: na::Point3::new(1.5, 0.2, 0.0),
+        luminous_flux: glm::Vec3::new(5.0, 5.0, 5.0),
+    });
+    renderer
+        .update_storage_from_lights(&lights)
+        .expect("Could not update storage buffer!");
 
     let mut camera = Camera::builder().build();
 
@@ -98,16 +127,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut running = true;
     event_loop.run(move |event, _, controlflow| match event {
         Event::WindowEvent {
-            event: WindowEvent::Resized(
-                size,
-            ),
+            event: WindowEvent::Resized(size),
             ..
         } => {
-            renderer.recreate_swapchain(size.width, size.height).expect("Recreate Swapchain");
-            camera.set_aspect(
-                size.width as f32 / size.height as f32
-            );
-            renderer.update_uniforms_from_camera(&camera).expect("camera buffer update");
+            renderer
+                .recreate_swapchain(size.width, size.height)
+                .expect("Recreate Swapchain");
+            camera.set_aspect(size.width as f32 / size.height as f32);
+            renderer
+                .update_uniforms_from_camera(&camera)
+                .expect("camera buffer update");
         }
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
@@ -172,7 +201,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             winit::event::VirtualKeyCode::Q => {
-                 turn_left_pressed = match pressed {
+                turn_left_pressed = match pressed {
                     winit::event::ElementState::Pressed => true,
                     winit::event::ElementState::Released => false,
                 };
@@ -240,9 +269,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("Could not update uniform buffer!");
             let result = renderer.render();
             match result {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(RendererError::VulkanError(ash::vk::Result::ERROR_OUT_OF_DATE_KHR)) => {} // Resize request will update swapchain
-                _ => result.expect("render error")
+                _ => result.expect("render error"),
             }
         }
         _ => {}

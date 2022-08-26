@@ -15,6 +15,7 @@ use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc
 
 mod buffer;
 pub mod camera;
+pub mod light;
 pub mod model;
 mod pipeline;
 mod shader_module;
@@ -28,6 +29,8 @@ use pipeline::GraphicsPipeline;
 use shader_module::ShaderModule;
 use swapchain::Swapchain;
 use vertex::Vertex;
+
+use self::light::LightManager;
 
 #[derive(Debug)]
 pub enum RendererError {
@@ -111,14 +114,18 @@ pub struct InstanceData {
     pub model_matrix: [[f32; 4]; 4],
     pub inverse_model_matrix: [[f32; 4]; 4],
     pub color: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
 }
 
 impl InstanceData {
-    pub fn from_matrix_and_color(model: glm::Mat4, color: glm::Vec3) -> Self {
+    pub fn new(model: glm::Mat4, color: glm::Vec3, metallic: f32, roughness: f32) -> Self {
         InstanceData {
             model_matrix: model.into(),
             inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
             color: color.into(),
+            metallic,
+            roughness,
         }
     }
 }
@@ -148,7 +155,9 @@ pub struct Renderer {
     current_image: usize,
     uniform_buffer: Buffer,
     descriptor_pool: vk::DescriptorPool,
-    descriptor_sets: Vec<vk::DescriptorSet>,
+    descriptor_sets_camera: Vec<vk::DescriptorSet>,
+    descriptor_sets_lights: Vec<vk::DescriptorSet>,
+    light_buffer: Buffer,
     pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
@@ -556,30 +565,57 @@ impl Renderer {
             unsafe { std::slice::from_raw_parts(camera_transforms.as_ptr() as *const u8, bytes) };
         uniform_buffer.fill(&mut allocator, data)?;
 
+        // Create storage buffer for lights
+        let mut light_buffer = Buffer::new(
+            &device,
+            &mut allocator,
+            8,
+            vk::BufferUsageFlags::STORAGE_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+        let data = unsafe { std::slice::from_raw_parts([0.0f32; 2].as_ptr() as *const u8, 8) };
+        light_buffer.fill(&mut allocator, data)?;
+
         // Create descriptor pool
-        let pool_sizes = [vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::UNIFORM_BUFFER,
-            descriptor_count: swapchain.get_actual_image_count(),
-        }];
+        let pool_sizes = [
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::UNIFORM_BUFFER,
+                descriptor_count: swapchain.get_actual_image_count(),
+            },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::STORAGE_BUFFER,
+                descriptor_count: swapchain.get_actual_image_count(),
+            },
+        ];
 
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count())
+            .max_sets(swapchain.get_actual_image_count() * 2)
             .pool_sizes(&pool_sizes);
         let descriptor_pool =
             unsafe { device.create_descriptor_pool(&descriptor_pool_info, None)? };
 
         // Now create the descriptor sets, one for each swapchain image
-        let descriptor_layouts = vec![
+        let descriptor_layouts_camera = vec![
             graphics_pipeline.descriptor_set_layouts[0];
             swapchain.get_actual_image_count() as usize
         ];
-        let descriptor_set_allocate_info = vk::DescriptorSetAllocateInfo::builder()
+        let descriptor_set_allocate_info_camera = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(descriptor_pool)
-            .set_layouts(&descriptor_layouts);
-        let descriptor_sets =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info)? };
+            .set_layouts(&descriptor_layouts_camera);
+        let descriptor_sets_camera =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_camera)? };
 
-        for ds in descriptor_sets.iter() {
+        let descriptor_layouts_lights = vec![
+            graphics_pipeline.descriptor_set_layouts[1];
+            swapchain.get_actual_image_count() as usize
+        ];
+        let descriptor_set_allocate_info_lights = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(&descriptor_layouts_lights);
+        let descriptor_sets_lights =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_lights)? };
+
+        for ds in descriptor_sets_camera.iter() {
             let buffer_info = [vk::DescriptorBufferInfo {
                 buffer: uniform_buffer.buffer,
                 offset: 0,
@@ -590,6 +626,24 @@ impl Renderer {
                 .dst_set(*ds)
                 .dst_binding(0)
                 .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(&buffer_info)
+                .build()];
+            unsafe {
+                device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+
+        for ds in descriptor_sets_lights.iter() {
+            let buffer_info = [vk::DescriptorBufferInfo {
+                buffer: light_buffer.buffer,
+                offset: 0,
+                range: 8,
+            }];
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
                 .buffer_info(&buffer_info)
                 .build()];
             unsafe {
@@ -622,7 +676,9 @@ impl Renderer {
             current_image: 0,
             uniform_buffer,
             descriptor_pool,
-            descriptor_sets,
+            descriptor_sets_camera,
+            descriptor_sets_lights,
+            light_buffer,
             models: vec![],
         })
     }
@@ -707,7 +763,7 @@ impl Renderer {
         let clear_values = [
             vk::ClearValue {
                 color: vk::ClearColorValue {
-                    float32: [0.0, 0.0, 0.08, 1.0],
+                    float32: [0.0, 0.0, 0.00, 1.0],
                 },
             },
             vk::ClearValue {
@@ -741,7 +797,10 @@ impl Renderer {
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.pipeline_layout,
                 0,
-                &[self.descriptor_sets[image_index]],
+                &[
+                    self.descriptor_sets_camera[image_index],
+                    self.descriptor_sets_lights[image_index],
+                ],
                 &[],
             );
             for m in &self.models {
@@ -815,6 +874,19 @@ impl Renderer {
     pub fn update_uniforms_from_camera(&mut self, camera: &Camera) -> VkResult<()> {
         if let Some(alloc) = &mut self.allocator {
             camera.update_buffer(alloc, &mut self.uniform_buffer)
+        } else {
+            panic!("No allocator!");
+        }
+    }
+
+    pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> VkResult<()> {
+        if let Some(alloc) = &mut self.allocator {
+            lights.update_buffer(
+                &self.device,
+                alloc,
+                &mut self.light_buffer,
+                &mut self.descriptor_sets_lights[..],
+            )
         } else {
             panic!("No allocator!");
         }
@@ -1137,6 +1209,7 @@ impl Drop for Renderer {
                 }
             }
             self.uniform_buffer.destroy(&mut allocator);
+            self.light_buffer.destroy(&mut allocator);
 
             self.frame_data.clear();
             self.device

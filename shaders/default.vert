@@ -6,6 +6,8 @@ layout (location=2) in vec2 uv;
 layout (location=3) in mat4 model_matrix;
 layout (location=7) in mat4 inverse_model_matrix;
 layout (location=11) in vec3 color;
+layout (location=12) in float metallic_in;
+layout (location=13) in float roughness_in;
 
 layout (set=0, binding=0) uniform UniformBufferObject {
     mat4 view_matrix;
@@ -16,6 +18,8 @@ layout (location=0) out vec3 outColor;
 layout (location=1) out vec3 out_normal;
 layout (location=2) out vec4 worldpos;
 layout (location=3) out vec3 camera_pos;
+layout (location=4) out float metallic;
+layout (location=5) out float roughness;
 
 void main() {
     worldpos = model_matrix*vec4(position, 1.0);
@@ -27,4 +31,6 @@ void main() {
 
     outColor = color;
     out_normal = vec3(transpose(inverse_model_matrix)*vec4(normalize(normal), 0.0));
+    metallic = metallic_in;
+    roughness = roughness_in;
 }
