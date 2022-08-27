@@ -106,6 +106,24 @@ impl GraphicsPipeline {
         let descriptor_set_layouts =
             vec![descriptor_set_layout_camera, descriptor_set_layout_lights];
 
+        // Create the descriptor set layout for the texture
+        let descriptor_set_layout_binding_descriptions_texture =
+            [vk::DescriptorSetLayoutBinding::builder()
+                .binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_count(1)
+                .stage_flags(vk::ShaderStageFlags::FRAGMENT)
+                .build()];
+
+        let descriptor_set_layout_info_texture = vk::DescriptorSetLayoutCreateInfo::builder()
+            .bindings(&descriptor_set_layout_binding_descriptions_texture);
+        let descriptor_set_layout_texture = unsafe {
+            device.create_descriptor_set_layout(&descriptor_set_layout_info_texture, None)?
+        };
+
+        let descriptor_set_layouts =
+            vec![descriptor_set_layout_camera, descriptor_set_layout_lights, descriptor_set_layout_texture];
+
         // Create the pipeline layout
         let pipeline_layout_info =
             vk::PipelineLayoutCreateInfo::builder().set_layouts(&descriptor_set_layouts);

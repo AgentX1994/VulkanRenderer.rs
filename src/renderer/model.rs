@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use ash::prelude::VkResult;
 use ash::vk;
+use nalgebra_glm as glm;
 use nalgebra_glm::{Vec2, Vec3};
 
 use gpu_allocator::vulkan::Allocator;
@@ -164,21 +165,30 @@ impl<V, I> Model<V, I> {
             Vec3::new(0.0, phi, 1.0),
             Vec2::new(0.5, 0.5),
         ); //11
+           // calculate texture coords according to: https://stackoverflow.com/q/41957890
+        let mut vertex_data = vec![
+            darkgreen_front_top,
+            darkgreen_front_bottom,
+            darkgreen_back_top,
+            darkgreen_back_bottom,
+            lightgreen_front_right,
+            lightgreen_front_left,
+            lightgreen_back_right,
+            lightgreen_back_left,
+            purple_top_left,
+            purple_top_right,
+            purple_bottom_left,
+            purple_bottom_right,
+        ];
+        for v in &mut vertex_data {
+            let norm = v.normal;
+            let norm = norm.normalize();
+            let theta = (norm.x.atan2(norm.z) / std::f32::consts::PI) / 2.0 + 0.5;
+            let phi = ((-norm.y).asin() / (std::f32::consts::PI / 2.0)) / 2.0 + 0.5;
+            v.uv = Vec2::new(theta, phi);
+        }
         Model {
-            vertex_data: vec![
-                darkgreen_front_top,
-                darkgreen_front_bottom,
-                darkgreen_back_top,
-                darkgreen_back_bottom,
-                lightgreen_front_right,
-                lightgreen_front_left,
-                lightgreen_back_right,
-                lightgreen_back_left,
-                purple_top_left,
-                purple_top_right,
-                purple_bottom_left,
-                purple_bottom_right,
-            ],
+            vertex_data,
             index_data: vec![
                 0, 9, 8, //
                 0, 8, 4, //

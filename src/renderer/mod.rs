@@ -20,6 +20,7 @@ pub mod model;
 mod pipeline;
 mod shader_module;
 mod swapchain;
+mod texture;
 pub mod vertex;
 
 use buffer::Buffer;
@@ -31,6 +32,7 @@ use swapchain::Swapchain;
 use vertex::Vertex;
 
 use self::light::LightManager;
+use self::texture::Texture;
 
 #[derive(Debug)]
 pub enum RendererError {
@@ -157,7 +159,9 @@ pub struct Renderer {
     descriptor_pool: vk::DescriptorPool,
     descriptor_sets_camera: Vec<vk::DescriptorSet>,
     descriptor_sets_lights: Vec<vk::DescriptorSet>,
+    descriptor_sets_texture: Vec<vk::DescriptorSet>,
     light_buffer: Buffer,
+    texture: Texture,
     pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
@@ -586,10 +590,14 @@ impl Renderer {
                 ty: vk::DescriptorType::STORAGE_BUFFER,
                 descriptor_count: swapchain.get_actual_image_count(),
             },
+            vk::DescriptorPoolSize {
+                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                descriptor_count: swapchain.get_actual_image_count(),
+            },
         ];
 
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count() * 2)
+            .max_sets(swapchain.get_actual_image_count() * 3)
             .pool_sizes(&pool_sizes);
         let descriptor_pool =
             unsafe { device.create_descriptor_pool(&descriptor_pool_info, None)? };
@@ -614,6 +622,16 @@ impl Renderer {
             .set_layouts(&descriptor_layouts_lights);
         let descriptor_sets_lights =
             unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_lights)? };
+
+        let descriptor_layouts_texture = vec![
+            graphics_pipeline.descriptor_set_layouts[2];
+            swapchain.get_actual_image_count() as usize
+        ];
+        let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(descriptor_pool)
+            .set_layouts(&descriptor_layouts_texture);
+        let descriptor_sets_texture =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_texture)? };
 
         for ds in descriptor_sets_camera.iter() {
             let buffer_info = [vk::DescriptorBufferInfo {
@@ -651,6 +669,32 @@ impl Renderer {
             }
         }
 
+        let texture = Texture::from_file(
+            "texture.png",
+            &device,
+            &mut allocator,
+            graphics_command_pool,
+            graphics_queue,
+        )?;
+
+        for ds in descriptor_sets_texture.iter() {
+            let image_info = [vk::DescriptorImageInfo {
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                image_view: texture.image_view,
+                sampler: texture.sampler
+            }];
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&image_info)
+                .build()];
+            unsafe {
+                device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+
         Ok(Renderer {
             dropped: false,
             _entry: entry,
@@ -678,7 +722,9 @@ impl Renderer {
             descriptor_pool,
             descriptor_sets_camera,
             descriptor_sets_lights,
+            descriptor_sets_texture,
             light_buffer,
+            texture,
             models: vec![],
         })
     }
@@ -800,6 +846,7 @@ impl Renderer {
                 &[
                     self.descriptor_sets_camera[image_index],
                     self.descriptor_sets_lights[image_index],
+                    self.descriptor_sets_texture[image_index],
                 ],
                 &[],
             );
@@ -1210,6 +1257,7 @@ impl Drop for Renderer {
             }
             self.uniform_buffer.destroy(&mut allocator);
             self.light_buffer.destroy(&mut allocator);
+            self.texture.destroy(&self.device, &mut allocator);
 
             self.frame_data.clear();
             self.device

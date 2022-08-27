@@ -20,6 +20,7 @@ layout (location=2) out vec4 worldpos;
 layout (location=3) out vec3 camera_pos;
 layout (location=4) out float metallic;
 layout (location=5) out float roughness;
+layout (location=6) out vec2 uv_out;
 
 void main() {
     worldpos = model_matrix*vec4(position, 1.0);
@@ -33,4 +34,5 @@ void main() {
     out_normal = vec3(transpose(inverse_model_matrix)*vec4(normalize(normal), 0.0));
     metallic = metallic_in;
     roughness = roughness_in;
+    uv_out = uv;
 }
