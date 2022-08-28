@@ -16,3 +16,6 @@ nalgebra-glm = "0.17"
 memoffset = "0.6.5"
 raw-window-handle = "0.5.0"
 image = "0.24.3"
+
+[profile.release]
+debug = true

@@ -183,8 +183,8 @@ impl<V, I> Model<V, I> {
         for v in &mut vertex_data {
             let norm = v.normal;
             let norm = norm.normalize();
-            let theta = (norm.x.atan2(norm.z) / std::f32::consts::PI) / 2.0 + 0.5;
-            let phi = ((-norm.y).asin() / (std::f32::consts::PI / 2.0)) / 2.0 + 0.5;
+            let theta = (norm.z.atan2(norm.x)) / (2.0 * std::f32::consts::PI) + 0.5;
+            let phi = (norm.y.asin() / std::f32::consts::PI) + 0.5;
             v.uv = Vec2::new(theta, phi);
         }
         Model {
@@ -230,7 +230,17 @@ impl<V, I> Model<V, I> {
         for v in &mut model.vertex_data {
             let pos = v.pos;
             v.pos = pos.normalize();
+            let norm = v.normal;
+            let norm = norm.normalize();
+            let theta = (norm.z.atan2(norm.x)) / (2.0 * std::f32::consts::PI) + 0.5;
+            let phi = (norm.y.asin() / std::f32::consts::PI) + 0.5;
+            v.uv = Vec2::new(theta, phi);
+            v.normal = norm;
         }
+        // TODO The UVs are better now, but some triangles wrap around in UV space causing a "zipper"
+        // This can be fixed, but I don't feel like it right now.
+        // The poles also only have one vertex, which messes with the UVs. This can also be fixed
+        // Related blog post: https://mft-dev.dk/uv-mapping-sphere/
         model
     }
 
