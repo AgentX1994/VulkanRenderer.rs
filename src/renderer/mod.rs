@@ -1,6 +1,7 @@
 use std::error;
 use std::ffi::{c_void, CStr, CString};
 use std::fmt;
+use std::path::Path;
 
 use ash::extensions::ext;
 use ash::extensions::khr;
@@ -32,7 +33,7 @@ use swapchain::Swapchain;
 use vertex::Vertex;
 
 use self::light::LightManager;
-use self::texture::Texture;
+use self::texture::TextureStorage;
 
 #[derive(Debug)]
 pub enum RendererError {
@@ -118,16 +119,24 @@ pub struct InstanceData {
     pub color: [f32; 3],
     pub metallic: f32,
     pub roughness: f32,
+    pub texture_id: u32,
 }
 
 impl InstanceData {
-    pub fn new(model: glm::Mat4, color: glm::Vec3, metallic: f32, roughness: f32) -> Self {
+    pub fn new(
+        model: glm::Mat4,
+        color: glm::Vec3,
+        metallic: f32,
+        roughness: f32,
+        texture_id: u32,
+    ) -> Self {
         InstanceData {
             model_matrix: model.into(),
             inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
             color: color.into(),
             metallic,
             roughness,
+            texture_id,
         }
     }
 }
@@ -161,7 +170,8 @@ pub struct Renderer {
     descriptor_sets_lights: Vec<vk::DescriptorSet>,
     descriptor_sets_texture: Vec<vk::DescriptorSet>,
     light_buffer: Buffer,
-    texture: Texture,
+    texture_storage: TextureStorage,
+    number_of_textures: u32,
     pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
@@ -294,10 +304,15 @@ impl Renderer {
                 .build()]
         };
 
+        let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::builder()
+            .runtime_descriptor_array(true)
+            .descriptor_binding_variable_descriptor_count(true);
+
         let device_create_info = vk::DeviceCreateInfo::builder()
             .queue_create_infos(&queue_infos)
             .enabled_extension_names(&device_extension_names)
-            .enabled_layer_names(layers);
+            .enabled_layer_names(layers)
+            .push_next(&mut indexing_features);
         let device =
             unsafe { instance.create_device(*physical_device, &device_create_info, None)? };
         Ok(device)
@@ -404,6 +419,92 @@ impl Renderer {
                 })
             })
             .collect()
+    }
+
+    fn create_descriptor_sets(
+        device: &Device,
+        pipeline: &GraphicsPipeline,
+        pool: &vk::DescriptorPool,
+        swapchain: &Swapchain,
+        uniform_buffer: &Buffer,
+        light_buffer: &Buffer,
+        num_textures: u32,
+    ) -> VkResult<(
+        Vec<vk::DescriptorSet>,
+        Vec<vk::DescriptorSet>,
+        Vec<vk::DescriptorSet>,
+    )> {
+        // Now create the descriptor sets, one for each swapchain image
+        let descriptor_layouts_camera =
+            vec![pipeline.descriptor_set_layouts[0]; swapchain.get_actual_image_count() as usize];
+        let descriptor_set_allocate_info_camera = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(*pool)
+            .set_layouts(&descriptor_layouts_camera);
+        let descriptor_sets_camera =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_camera)? };
+
+        let descriptor_layouts_lights =
+            vec![pipeline.descriptor_set_layouts[1]; swapchain.get_actual_image_count() as usize];
+        let descriptor_set_allocate_info_lights = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(*pool)
+            .set_layouts(&descriptor_layouts_lights);
+        let descriptor_sets_lights =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_lights)? };
+
+        let descriptor_layouts_texture =
+            vec![pipeline.descriptor_set_layouts[2]; swapchain.get_actual_image_count() as usize];
+        let descriptor_counts_texture = vec![num_textures; swapchain.get_actual_image_count() as usize];
+        let mut variable_descriptor_allocate_info_texture =
+            vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
+                .descriptor_counts(&descriptor_counts_texture);
+        let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(*pool)
+            .set_layouts(&descriptor_layouts_texture)
+            .push_next(&mut variable_descriptor_allocate_info_texture);
+        let descriptor_sets_texture =
+            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_texture)? };
+
+        for ds in descriptor_sets_camera.iter() {
+            let buffer_info = [vk::DescriptorBufferInfo {
+                buffer: uniform_buffer.buffer,
+                offset: 0,
+                range: std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
+            }];
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .buffer_info(&buffer_info)
+                .build()];
+            unsafe {
+                device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+
+        for ds in descriptor_sets_lights.iter() {
+            let buffer_info = [vk::DescriptorBufferInfo {
+                buffer: light_buffer.buffer,
+                offset: 0,
+                range: 8,
+            }];
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+                .buffer_info(&buffer_info)
+                .build()];
+            unsafe {
+                device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+
+        Ok((
+            descriptor_sets_camera,
+            descriptor_sets_lights,
+            descriptor_sets_texture,
+        ))
     }
 
     pub fn new(
@@ -535,6 +636,7 @@ impl Renderer {
             shader_module.get_stages(),
             &Vertex::get_attribute_descriptions(),
             &Vertex::get_binding_description(),
+            0,
         )?;
 
         // Create command pools
@@ -592,108 +694,28 @@ impl Renderer {
             },
             vk::DescriptorPoolSize {
                 ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: swapchain.get_actual_image_count(),
+                descriptor_count: GraphicsPipeline::MAXIMUM_NUMBER_OF_TEXTURES
+                    * swapchain.get_actual_image_count(),
             },
         ];
 
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
             .max_sets(swapchain.get_actual_image_count() * 3)
-            .pool_sizes(&pool_sizes);
+            .pool_sizes(&pool_sizes)
+            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
         let descriptor_pool =
             unsafe { device.create_descriptor_pool(&descriptor_pool_info, None)? };
 
-        // Now create the descriptor sets, one for each swapchain image
-        let descriptor_layouts_camera = vec![
-            graphics_pipeline.descriptor_set_layouts[0];
-            swapchain.get_actual_image_count() as usize
-        ];
-        let descriptor_set_allocate_info_camera = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&descriptor_layouts_camera);
-        let descriptor_sets_camera =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_camera)? };
-
-        let descriptor_layouts_lights = vec![
-            graphics_pipeline.descriptor_set_layouts[1];
-            swapchain.get_actual_image_count() as usize
-        ];
-        let descriptor_set_allocate_info_lights = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&descriptor_layouts_lights);
-        let descriptor_sets_lights =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_lights)? };
-
-        let descriptor_layouts_texture = vec![
-            graphics_pipeline.descriptor_set_layouts[2];
-            swapchain.get_actual_image_count() as usize
-        ];
-        let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&descriptor_layouts_texture);
-        let descriptor_sets_texture =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_texture)? };
-
-        for ds in descriptor_sets_camera.iter() {
-            let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: uniform_buffer.buffer,
-                offset: 0,
-                range: std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
-            }];
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(&buffer_info)
-                .build()];
-            unsafe {
-                device.update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
-
-        for ds in descriptor_sets_lights.iter() {
-            let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: light_buffer.buffer,
-                offset: 0,
-                range: 8,
-            }];
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_info)
-                .build()];
-            unsafe {
-                device.update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
-
-        let texture = Texture::from_file(
-            "texture.png",
-            &device,
-            &mut allocator,
-            graphics_command_pool,
-            graphics_queue,
-        )?;
-
-        for ds in descriptor_sets_texture.iter() {
-            let image_info = [vk::DescriptorImageInfo {
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                image_view: texture.image_view,
-                sampler: texture.sampler
-            }];
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&image_info)
-                .build()];
-            unsafe {
-                device.update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
+        let (descriptor_sets_camera, descriptor_sets_lights, descriptor_sets_texture) =
+            Self::create_descriptor_sets(
+                &device,
+                &graphics_pipeline,
+                &descriptor_pool,
+                &swapchain,
+                &uniform_buffer,
+                &light_buffer,
+                0
+            )?;
 
         Ok(Renderer {
             dropped: false,
@@ -724,7 +746,8 @@ impl Renderer {
             descriptor_sets_lights,
             descriptor_sets_texture,
             light_buffer,
-            texture,
+            texture_storage: TextureStorage::default(),
+            number_of_textures: 0,
             models: vec![],
         })
     }
@@ -767,7 +790,29 @@ impl Renderer {
                 self.shader_module.get_stages(),
                 &Vertex::get_attribute_descriptions(),
                 &Vertex::get_binding_description(),
+                self.number_of_textures,
             )?;
+            unsafe {
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_camera)?;
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_lights)?;
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)?;
+            }
+            let (a, b, c) = Self::create_descriptor_sets(
+                &self.device,
+                &self.graphics_pipeline,
+                &self.descriptor_pool,
+                &self.swapchain,
+                &self.uniform_buffer,
+                &self.light_buffer,
+                self.texture_storage.get_number_of_textures() as u32,
+            )?;
+            self.descriptor_sets_camera = a;
+            self.descriptor_sets_lights = b;
+            self.descriptor_sets_texture = c;
+            self.update_textures()?;
         }
         Ok(())
     }
@@ -937,6 +982,72 @@ impl Renderer {
         } else {
             panic!("No allocator!");
         }
+    }
+
+    pub fn new_texture_from_file<P: AsRef<Path>>(&mut self, path: P) -> VkResult<usize> {
+        if let Some(allo) = &mut self.allocator {
+            self.texture_storage.new_texture_from_file(
+                path,
+                &self.device,
+                allo,
+                self.graphics_command_pool,
+                self.graphics_queue,
+            )
+        } else {
+            panic!("No allocator!");
+        }
+    }
+
+    pub fn update_textures(&mut self) -> VkResult<()> {
+        let num_texs = self.texture_storage.get_number_of_textures() as u32;
+        if self.number_of_textures < num_texs {
+            self.graphics_pipeline.destroy();
+            self.graphics_pipeline = GraphicsPipeline::new(
+                &self.device,
+                self.swapchain.get_extent(),
+                &self.render_pass,
+                self.shader_module.get_stages(),
+                &Vertex::get_attribute_descriptions(),
+                &Vertex::get_binding_description(),
+                num_texs,
+            )?;
+            unsafe {
+                self.device
+                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)
+            }?;
+            let descriptor_layouts_texture = vec![
+                self.graphics_pipeline.descriptor_set_layouts[2];
+                self.swapchain.get_actual_image_count() as usize
+            ];
+            let descriptor_counts_texture =
+                vec![num_texs; self.swapchain.get_actual_image_count() as usize];
+            let mut variable_descriptor_allocate_info_texture =
+                vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
+                    .descriptor_counts(&descriptor_counts_texture);
+            let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(self.descriptor_pool)
+                .set_layouts(&descriptor_layouts_texture)
+                .push_next(&mut variable_descriptor_allocate_info_texture);
+            self.descriptor_sets_texture = unsafe {
+                self.device
+                    .allocate_descriptor_sets(&descriptor_set_allocate_info_texture)?
+            };
+            self.number_of_textures = num_texs;
+        }
+        for ds in self.descriptor_sets_texture.iter() {
+            let image_info = self.texture_storage.get_descriptor_image_info();
+
+            let desc_sets_write = [vk::WriteDescriptorSet::builder()
+                .dst_set(*ds)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .image_info(&image_info)
+                .build()];
+            unsafe {
+                self.device.update_descriptor_sets(&desc_sets_write, &[]);
+            }
+        }
+        Ok(())
     }
 
     pub fn screenshot(&mut self) -> VkResult<()> {
@@ -1257,7 +1368,7 @@ impl Drop for Renderer {
             }
             self.uniform_buffer.destroy(&mut allocator);
             self.light_buffer.destroy(&mut allocator);
-            self.texture.destroy(&self.device, &mut allocator);
+            self.texture_storage.clean_up(&self.device, &mut allocator);
 
             self.frame_data.clear();
             self.device

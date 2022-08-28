@@ -10,6 +10,8 @@ pub struct GraphicsPipeline {
 }
 
 impl GraphicsPipeline {
+    pub const MAXIMUM_NUMBER_OF_TEXTURES: u32 = 1024;
+
     pub fn new(
         device: &Device,
         extent: vk::Extent2D,
@@ -17,7 +19,9 @@ impl GraphicsPipeline {
         shader_stages: &[vk::PipelineShaderStageCreateInfo],
         vertex_attrib_descs: &[vk::VertexInputAttributeDescription],
         vertex_binding_descs: &[vk::VertexInputBindingDescription],
+        number_of_textures: u32,
     ) -> VkResult<GraphicsPipeline> {
+        assert!(number_of_textures < Self::MAXIMUM_NUMBER_OF_TEXTURES);
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_attribute_descriptions(vertex_attrib_descs)
             .vertex_binding_descriptions(vertex_binding_descs);
@@ -103,20 +107,22 @@ impl GraphicsPipeline {
             device.create_descriptor_set_layout(&descriptor_set_layout_info_lights, None)?
         };
 
-        let descriptor_set_layouts =
-            vec![descriptor_set_layout_camera, descriptor_set_layout_lights];
-
         // Create the descriptor set layout for the texture
         let descriptor_set_layout_binding_descriptions_texture =
             [vk::DescriptorSetLayoutBinding::builder()
                 .binding(0)
                 .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .descriptor_count(1)
+                .descriptor_count(number_of_textures)
                 .stage_flags(vk::ShaderStageFlags::FRAGMENT)
                 .build()];
+        
+        let descriptor_binding_flags_texture = [vk::DescriptorBindingFlags::VARIABLE_DESCRIPTOR_COUNT];
+        let mut descriptor_set_layout_binding_flags_texture = vk::DescriptorSetLayoutBindingFlagsCreateInfo::builder()
+            .binding_flags(&descriptor_binding_flags_texture);
 
         let descriptor_set_layout_info_texture = vk::DescriptorSetLayoutCreateInfo::builder()
-            .bindings(&descriptor_set_layout_binding_descriptions_texture);
+            .bindings(&descriptor_set_layout_binding_descriptions_texture)
+            .push_next(&mut descriptor_set_layout_binding_flags_texture);
         let descriptor_set_layout_texture = unsafe {
             device.create_descriptor_set_layout(&descriptor_set_layout_info_texture, None)?
         };

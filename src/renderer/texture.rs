@@ -1,5 +1,3 @@
-use std::fs::copy;
-
 use ash::{prelude::VkResult, vk, Device};
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, Allocator},
@@ -221,6 +219,57 @@ impl Texture {
             device.destroy_sampler(self.sampler, None);
             device.destroy_image_view(self.image_view, None);
             device.destroy_image(self.vk_image, None);
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct TextureStorage {
+    textures: Vec<Texture>
+}
+
+impl TextureStorage {
+    pub fn new_texture_from_file<P: AsRef<std::path::Path>>(
+        &mut self,
+        path: P,
+        device: &Device,
+        allocator: &mut Allocator,
+        command_pool: vk::CommandPool,
+        queue: vk::Queue,
+    ) -> VkResult<usize> {
+        let texture = Texture::from_file(path, device, allocator, command_pool, queue)?;
+        let new_id = self.textures.len();
+        self.textures.push(texture);
+        Ok(new_id)
+    }
+
+    pub fn get_number_of_textures(&self) -> usize {
+        self.textures.len()
+    }
+
+    pub fn get_texture(&self, index: usize) -> Option<&Texture> {
+        self.textures.get(index)
+    }
+
+
+    pub fn get_texture_mut(&mut self, index: usize) -> Option<&mut Texture> {
+        self.textures.get_mut(index)
+    }
+
+    pub fn get_descriptor_image_info(&self) -> Vec<vk::DescriptorImageInfo> {
+        self.textures
+            .iter()
+            .map(|tex| vk::DescriptorImageInfo {
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                image_view: tex.image_view,
+                sampler: tex.sampler
+            })
+            .collect()
+    }
+
+    pub fn clean_up(&mut self, device: &Device, allocator: &mut Allocator) {
+        for texture in &mut self.textures {
+            texture.destroy(device, allocator);
         }
     }
 }

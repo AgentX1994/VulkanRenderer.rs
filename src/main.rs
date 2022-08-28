@@ -79,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 glm::vec3(0.0, 0.0, 0.8),
                 i as f32 * 0.1,
                 j as f32 * 0.1,
+                ((i + j) % 3) as u32,
             ));
         }
     }
@@ -123,6 +124,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut turn_right_pressed = false;
     let mut turn_left_pressed = false;
 
+    let _tex1_index = renderer.new_texture_from_file("texture.png")?;
+    let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
+    let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
+    renderer.update_textures()?;
+
     // Run event loop
     let mut running = true;
     event_loop.run(move |event, _, controlflow| match event {
@@ -137,6 +143,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             renderer
                 .update_uniforms_from_camera(&camera)
                 .expect("camera buffer update");
+            renderer
+                .update_storage_from_lights(&lights)
+                .expect("light update");
         }
         Event::WindowEvent {
             event: WindowEvent::CloseRequested,
@@ -219,8 +228,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
             }
             winit::event::VirtualKeyCode::F12 => {
-                renderer.screenshot().expect("Could not take screenshot");
-                println!("Screenshotted!");
+                if matches!(pressed, winit::event::ElementState::Pressed) {
+                    renderer.screenshot().expect("Could not take screenshot");
+                    println!("Screenshotted!");
+                }
             }
             _ => {}
         },

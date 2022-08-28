@@ -8,6 +8,7 @@ layout (location=7) in mat4 inverse_model_matrix;
 layout (location=11) in vec3 color;
 layout (location=12) in float metallic_in;
 layout (location=13) in float roughness_in;
+layout (location=14) in uint texture_id_in;
 
 layout (set=0, binding=0) uniform UniformBufferObject {
     mat4 view_matrix;
@@ -21,6 +22,7 @@ layout (location=3) out vec3 camera_pos;
 layout (location=4) out float metallic;
 layout (location=5) out float roughness;
 layout (location=6) out vec2 uv_out;
+layout (location=7) flat out uint texture_id;
 
 void main() {
     worldpos = model_matrix*vec4(position, 1.0);
@@ -35,4 +37,5 @@ void main() {
     metallic = metallic_in;
     roughness = roughness_in;
     uv_out = uv;
+    texture_id = texture_id_in;
 }

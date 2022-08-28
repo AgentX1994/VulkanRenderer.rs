@@ -2,7 +2,6 @@ use std::collections::HashMap;
 
 use ash::prelude::VkResult;
 use ash::vk;
-use nalgebra_glm as glm;
 use nalgebra_glm::{Vec2, Vec3};
 
 use gpu_allocator::vulkan::Allocator;

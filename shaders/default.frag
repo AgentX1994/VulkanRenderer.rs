@@ -1,4 +1,5 @@
 #version 450
+#extension GL_EXT_nonuniform_qualifier : require
 
 layout (location=0) in vec3 color;
 layout (location=1) in vec3 normal_varied;
@@ -7,6 +8,7 @@ layout (location=3) in vec3 camera_pos;
 layout (location=4) in float metallic_in;
 layout (location=5) in float roughness_in;
 layout (location=6) in vec2 uv;
+layout (location=7) flat in uint texture_id;
 
 layout (location=0) out vec4 outColor;
 
@@ -16,7 +18,7 @@ readonly layout (set=1, binding=0) buffer StorageBufferObject {
     vec3 data[];
 } sbo;
 
-layout (set=2, binding=0) uniform sampler2D texture_sampler;
+layout (set=2, binding=0) uniform sampler2D texture_sampler[];
 
 const float PI = 3.14159265358979323846264;
 
@@ -77,7 +79,7 @@ void main() {
     int num_dir = int(sbo.num_directional);
     int num_point = int(sbo.num_point);
 
-    vec3 surface_color = texture(texture_sampler, uv).rgb;
+    vec3 surface_color = texture(texture_sampler[texture_id], uv).rgb;
 
     for (int i = 0; i < num_dir; i++) {
         vec3 data1 = sbo.data[2*i];
