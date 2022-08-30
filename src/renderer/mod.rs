@@ -21,6 +21,7 @@ pub mod model;
 mod pipeline;
 mod shader_module;
 mod swapchain;
+mod text;
 mod texture;
 pub mod vertex;
 
@@ -33,6 +34,7 @@ use swapchain::Swapchain;
 use vertex::Vertex;
 
 use self::light::LightManager;
+use self::text::TextHandler;
 use self::texture::TextureStorage;
 
 #[derive(Debug)]
@@ -172,6 +174,7 @@ pub struct Renderer {
     light_buffer: Buffer,
     texture_storage: TextureStorage,
     number_of_textures: u32,
+    pub text: TextHandler,
     pub models: Vec<Model<Vertex, InstanceData>>,
 }
 
@@ -453,7 +456,8 @@ impl Renderer {
 
         let descriptor_layouts_texture =
             vec![pipeline.descriptor_set_layouts[2]; swapchain.get_actual_image_count() as usize];
-        let descriptor_counts_texture = vec![num_textures; swapchain.get_actual_image_count() as usize];
+        let descriptor_counts_texture =
+            vec![num_textures; swapchain.get_actual_image_count() as usize];
         let mut variable_descriptor_allocate_info_texture =
             vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
                 .descriptor_counts(&descriptor_counts_texture);
@@ -628,7 +632,11 @@ impl Renderer {
             &render_pass,
         )?;
 
-        let shader_module = ShaderModule::new(&device)?;
+        let shader_module = ShaderModule::new(
+            &device,
+            vk_shader_macros::include_glsl!("./shaders/default.vert", kind: vert),
+            vk_shader_macros::include_glsl!("./shaders/default.frag", kind: frag),
+        )?;
         let graphics_pipeline = GraphicsPipeline::new(
             &device,
             swapchain.get_extent(),
@@ -714,8 +722,11 @@ impl Renderer {
                 &swapchain,
                 &uniform_buffer,
                 &light_buffer,
-                0
+                0,
             )?;
+
+        let text = TextHandler::new(&device, &swapchain, &render_pass, "Roboto-Regular.ttf")
+            .expect("Create Text Handler");
 
         Ok(Renderer {
             dropped: false,
@@ -748,6 +759,7 @@ impl Renderer {
             light_buffer,
             texture_storage: TextureStorage::default(),
             number_of_textures: 0,
+            text,
             models: vec![],
         })
     }
@@ -813,6 +825,9 @@ impl Renderer {
             self.descriptor_sets_lights = b;
             self.descriptor_sets_texture = c;
             self.update_textures()?;
+            self.text.clear_pipeline();
+            self.text
+                .update_textures(&self.render_pass, &self.swapchain, &self.device)?;
         }
         Ok(())
     }
@@ -898,6 +913,7 @@ impl Renderer {
             for m in &self.models {
                 m.draw(&self.device, *cmd_buf);
             }
+            self.text.draw(&self.device, *cmd_buf, image_index);
             self.device.cmd_end_render_pass(*cmd_buf);
             self.device.end_command_buffer(*cmd_buf)?;
         }
@@ -1046,6 +1062,31 @@ impl Renderer {
             unsafe {
                 self.device.update_descriptor_sets(&desc_sets_write, &[]);
             }
+        }
+        Ok(())
+    }
+
+    pub fn add_text(
+        &mut self,
+        window: &winit::window::Window,
+        position: (u32, u32),
+        styles: &[&fontdue::layout::TextStyle],
+        color: [f32; 3],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let letters = self.text.create_letters(styles, color);
+        if let Some(allo) = &mut self.allocator {
+            self.text.create_vertex_data(
+                letters,
+                position,
+                window,
+                &self.device,
+                allo,
+                &self.render_pass,
+                &self.graphics_command_pool,
+                &self.graphics_queue,
+                &self.swapchain,
+            );
+            self.text.update_vertex_buffer(&self.device, allo)?;
         }
         Ok(())
     }
@@ -1378,6 +1419,7 @@ impl Drop for Renderer {
             for fb in self.framebuffers.iter() {
                 self.device.destroy_framebuffer(*fb, None);
             }
+            self.text.destroy(&self.device, &mut allocator);
             self.device.destroy_render_pass(self.render_pass, None);
             self.swapchain.destroy(&mut allocator);
             self.surface_loader.destroy_surface(self.surface, None);

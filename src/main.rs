@@ -129,6 +129,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
     renderer.update_textures()?;
 
+    // Create some text
+    renderer.add_text(
+        &window,
+        (100, 200),
+        &[
+            &fontdue::layout::TextStyle::new("Hello ", 35.0, 0),
+            &fontdue::layout::TextStyle::new("world!", 40.0, 0),
+            &fontdue::layout::TextStyle::new("(and smaller)", 8.0, 0),
+        ],
+        [0., 1., 0.],
+    )?;
+    renderer.add_text(
+        &window,
+        (100, 200),
+        &[
+            &fontdue::layout::TextStyle::new("Hello ", 35.0, 0),
+            &fontdue::layout::TextStyle::new("world!", 40.0, 0),
+            &fontdue::layout::TextStyle::new("(and smaller)", 8.0, 0),
+        ],
+        [0.6, 0.6, 0.6],
+    )?;
+
+
     // Run event loop
     let mut running = true;
     event_loop.run(move |event, _, controlflow| match event {

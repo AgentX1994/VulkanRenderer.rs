@@ -12,16 +12,12 @@ pub struct ShaderModule {
 }
 
 impl ShaderModule {
-    pub fn new(device: &Device) -> VkResult<ShaderModule> {
-        let vert_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(
-            vk_shader_macros::include_glsl!("./shaders/default.vert", kind: vert),
-        );
+    pub fn new(device: &Device, vert: &[u32], frag: &[u32]) -> VkResult<ShaderModule> {
+        let vert_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(vert);
         let vert_shader_module =
             unsafe { device.create_shader_module(&vert_shader_create_info, None)? };
 
-        let frag_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(
-            vk_shader_macros::include_glsl!("./shaders/default.frag", kind: frag),
-        );
+        let frag_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(frag);
         let frag_shader_module =
             unsafe { device.create_shader_module(&frag_shader_create_info, None)? };
 
