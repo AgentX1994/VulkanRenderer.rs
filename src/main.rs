@@ -17,7 +17,7 @@ use nalgebra_glm as glm;
 use vulkan_rust::renderer::model::Model;
 use vulkan_rust::renderer::vertex::Vertex;
 use vulkan_rust::renderer::InstanceData;
-use vulkan_rust::renderer::{Renderer, RendererError};
+use vulkan_rust::renderer::{Renderer, error::RendererError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -108,8 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         luminous_flux: glm::Vec3::new(5.0, 5.0, 5.0),
     });
     renderer
-        .update_storage_from_lights(&lights)
-        .expect("Could not update storage buffer!");
+        .update_storage_from_lights(&lights)?;
 
     let mut camera = Camera::builder().build();
 

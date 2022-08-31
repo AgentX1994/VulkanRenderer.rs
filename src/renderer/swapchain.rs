@@ -1,10 +1,11 @@
 use ash::extensions::khr;
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::{Device, Instance};
 
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 use gpu_allocator::MemoryLocation;
+
+use super::RendererResult;
 
 pub struct Swapchain {
     device: Device,
@@ -61,7 +62,7 @@ impl Swapchain {
         allocator: &mut Allocator,
         width: u32,
         height: u32
-    ) -> VkResult<Self> {
+    ) -> RendererResult<Self> {
         // Get capabilities of the surface
         let surface_capabilities = unsafe {
             surface_loader.get_physical_device_surface_capabilities(*physical_device, *surface)?
@@ -142,8 +143,7 @@ impl Swapchain {
                 requirements: reqs,
                 location: MemoryLocation::GpuOnly,
                 linear: false,
-            })
-            .unwrap(); // TODO error handling.
+            })?;
         unsafe {
             device.bind_image_memory(
                 depth_image,
@@ -214,7 +214,7 @@ impl Swapchain {
         timeout: u64,
         semaphore: &vk::Semaphore,
         fence: vk::Fence,
-    ) -> VkResult<u32> {
+    ) -> RendererResult<u32> {
         let (image_index, _) = unsafe {
             self.swapchain_loader
                 .acquire_next_image(self.swapchain, timeout, *semaphore, fence)?
@@ -231,7 +231,7 @@ impl Swapchain {
         queue: &vk::Queue,
         semaphore: &vk::Semaphore,
         image_index: u32,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         let swapchains = [self.swapchain];
         let indices = [image_index];
         let semaphores = [*semaphore];

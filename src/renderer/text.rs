@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::Device;
 
@@ -10,6 +9,7 @@ use gpu_allocator::vulkan::{Allocation, Allocator};
 use gpu_allocator::MemoryLocation;
 use memoffset::offset_of;
 
+use super::RendererResult;
 use super::buffer::Buffer;
 use super::pipeline::GraphicsPipeline;
 use super::shader_module::ShaderModule;
@@ -31,7 +31,7 @@ impl TextTexture {
         allocator: &mut Allocator,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-    ) -> VkResult<Self> {
+    ) -> RendererResult<Self> {
         // Create Image
         let img_create_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
@@ -297,10 +297,8 @@ pub struct TextHandler {
 impl TextHandler {
     pub fn new<P: AsRef<std::path::Path>>(
         device: &Device,
-        swapchain: &Swapchain,
-        render_pass: &vk::RenderPass,
         standard_font: P,
-    ) -> Result<TextHandler, Box<dyn std::error::Error>> {
+    ) -> RendererResult<TextHandler> {
         let shader_module = ShaderModule::new(
             device,
             vk_shader_macros::include_glsl!("./shaders/text.vert", kind: vert),
@@ -327,7 +325,7 @@ impl TextHandler {
     pub fn load_font<P: AsRef<Path>>(
         &mut self,
         path: P,
-    ) -> Result<usize, Box<dyn std::error::Error>> {
+    ) -> RendererResult<usize> {
         let font_data = std::fs::read(path)?;
         let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
         let index = self.fonts.len();
@@ -368,7 +366,7 @@ impl TextHandler {
         allocator: &mut Allocator,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-    ) -> VkResult<usize> {
+    ) -> RendererResult<usize> {
         let new_texture =
             TextTexture::from_u8s(data, width, height, device, allocator, command_pool, queue)?;
         let new_id = self.textures.len();
@@ -387,7 +385,7 @@ impl TextHandler {
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
         swapchain: &Swapchain,
-    ) {
+    ) -> RendererResult<()> {
         let screen_size = window.inner_size();
         let mut need_texture_update = false;
         let mut vertex_data = Vec::with_capacity(6 * letters.len());
@@ -411,8 +409,7 @@ impl TextHandler {
                         allocator,
                         command_pool,
                         queue,
-                    )
-                    .unwrap() as u32;
+                    )? as u32;
                 self.texture_ids.insert(l.position_and_shape.key, id);
                 id
             };
@@ -464,9 +461,9 @@ impl TextHandler {
         }
         self.vertex_data.append(&mut vertex_data);
         if need_texture_update {
-            self.update_textures(render_pass, swapchain, device)
-                .expect("Update text textures");
+            self.update_textures(render_pass, swapchain, device)?;
         }
+        Ok(())
     }
 
     pub fn update_textures(
@@ -474,7 +471,7 @@ impl TextHandler {
         render_pass: &vk::RenderPass,
         swapchain: &Swapchain,
         device: &Device,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         let amount = self.textures.len();
         if amount > self.number_of_textures {
             self.number_of_textures = amount;
@@ -552,7 +549,7 @@ impl TextHandler {
         &mut self,
         device: &Device,
         allocator: &mut Allocator,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         if self.vertex_data.is_empty() {
             return Ok(());
         }
@@ -634,14 +631,7 @@ impl TextHandler {
             b.destroy(allocator);
         }
         for t in &mut self.textures {
-            allocator
-                .free(t.allocation.take().expect("text texture had no allocation"))
-                .expect("Could not free text texture");
-            unsafe {
-                device.destroy_sampler(t.sampler, None);
-                device.destroy_image_view(t.image_view, None);
-                device.destroy_image(t.image, None);
-            }
+            t.destroy(device, allocator);
         }
         self.shader_module.destroy();
     }

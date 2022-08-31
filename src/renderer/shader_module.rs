@@ -1,8 +1,9 @@
 use std::ffi::CStr;
 
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::Device;
+
+use super::RendererResult;
 
 pub struct ShaderModule {
     device: Device,
@@ -12,7 +13,7 @@ pub struct ShaderModule {
 }
 
 impl ShaderModule {
-    pub fn new(device: &Device, vert: &[u32], frag: &[u32]) -> VkResult<ShaderModule> {
+    pub fn new(device: &Device, vert: &[u32], frag: &[u32]) -> RendererResult<ShaderModule> {
         let vert_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(vert);
         let vert_shader_module =
             unsafe { device.create_shader_module(&vert_shader_create_info, None)? };

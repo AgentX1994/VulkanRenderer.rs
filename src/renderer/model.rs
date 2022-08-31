@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use ash::prelude::VkResult;
 use ash::vk;
 use nalgebra_glm::{Vec2, Vec3};
 
@@ -10,10 +9,10 @@ use gpu_allocator::MemoryLocation;
 use crate::renderer::Buffer;
 
 use super::vertex::Vertex;
-use super::InstanceData;
+use super::{InstanceData, RendererResult};
 
 #[derive(Debug, Clone, Copy)]
-struct InvalidHandle;
+pub struct InvalidHandle;
 impl std::fmt::Display for InvalidHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Invalid Handle")
@@ -339,7 +338,7 @@ impl<V, I> Model<V, I> {
         new_handle
     }
 
-    fn remove(&mut self, handle: usize) -> Result<I, InvalidHandle> {
+    fn remove(&mut self, handle: usize) -> RendererResult<I> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             if index < self.first_invisible {
                 self.swap_by_index(index, self.first_invisible - 1);
@@ -350,7 +349,7 @@ impl<V, I> Model<V, I> {
             self.handle_to_index.remove(&handle);
             Ok(self.instances.pop().unwrap())
         } else {
-            Err(InvalidHandle)
+            Err(InvalidHandle.into())
         }
     }
 
@@ -358,7 +357,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.vertex_buffer {
             let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
             let data = unsafe {
@@ -388,7 +387,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.index_buffer {
             let bytes = self.vertex_data.len() * std::mem::size_of::<u32>();
             let data =
@@ -416,7 +415,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.instance_buffer {
             let bytes = self.first_invisible * std::mem::size_of::<I>();
             let data = unsafe {

@@ -1,6 +1,7 @@
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::Device;
+
+use super::RendererResult;
 
 pub struct GraphicsPipeline {
     device: Device,
@@ -20,7 +21,7 @@ impl GraphicsPipeline {
         vertex_attrib_descs: &[vk::VertexInputAttributeDescription],
         vertex_binding_descs: &[vk::VertexInputBindingDescription],
         number_of_textures: u32,
-    ) -> VkResult<GraphicsPipeline> {
+    ) -> RendererResult<GraphicsPipeline> {
         assert!(number_of_textures < Self::MAXIMUM_NUMBER_OF_TEXTURES);
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_attribute_descriptions(vertex_attrib_descs)
@@ -184,7 +185,7 @@ impl GraphicsPipeline {
         vertex_attrib_descs: &[vk::VertexInputAttributeDescription],
         vertex_binding_descs: &[vk::VertexInputBindingDescription],
         number_of_textures: u32,
-    ) -> VkResult<GraphicsPipeline> {
+    ) -> RendererResult<GraphicsPipeline> {
         assert!(number_of_textures < Self::MAXIMUM_NUMBER_OF_TEXTURES);
         let vertex_input_info = vk::PipelineVertexInputStateCreateInfo::builder()
             .vertex_attribute_descriptions(vertex_attrib_descs)

@@ -1,11 +1,8 @@
-use std::error;
 use std::ffi::{c_void, CStr, CString};
-use std::fmt;
 use std::path::Path;
 
 use ash::extensions::ext;
 use ash::extensions::khr;
-use ash::prelude::VkResult;
 use ash::vk;
 use ash::{Device, Instance};
 
@@ -16,6 +13,7 @@ use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc
 
 mod buffer;
 pub mod camera;
+pub mod error;
 pub mod light;
 pub mod model;
 mod pipeline;
@@ -33,47 +31,12 @@ use shader_module::ShaderModule;
 use swapchain::Swapchain;
 use vertex::Vertex;
 
+use self::error::RendererError;
 use self::light::LightManager;
 use self::text::TextHandler;
 use self::texture::TextureStorage;
 
-#[derive(Debug)]
-pub enum RendererError {
-    LoadError(ash::LoadingError),
-    VulkanError(vk::Result),
-}
-
-impl fmt::Display for RendererError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            RendererError::LoadError(ref e) => e.fmt(f),
-            RendererError::VulkanError(ref e) => e.fmt(f),
-        }
-    }
-}
-
-impl error::Error for RendererError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match *self {
-            RendererError::LoadError(ref e) => Some(e),
-            RendererError::VulkanError(ref e) => Some(e),
-        }
-    }
-}
-
-impl From<ash::LoadingError> for RendererError {
-    fn from(e: ash::LoadingError) -> RendererError {
-        RendererError::LoadError(e)
-    }
-}
-
-impl From<vk::Result> for RendererError {
-    fn from(e: vk::Result) -> RendererError {
-        RendererError::VulkanError(e)
-    }
-}
-
-pub type RendererResult<T> = Result<T, RendererError>;
+pub use error::RendererResult;
 
 unsafe extern "system" fn vulkan_debug_utils_callback(
     message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -228,7 +191,7 @@ impl Renderer {
 
     fn pick_physical_device(
         instance: &Instance,
-    ) -> VkResult<(vk::PhysicalDevice, vk::PhysicalDeviceProperties)> {
+    ) -> RendererResult<(vk::PhysicalDevice, vk::PhysicalDeviceProperties)> {
         // Physical Device
         let phys_devs = unsafe { instance.enumerate_physical_devices()? };
 
@@ -240,7 +203,7 @@ impl Renderer {
                 chosen = Some((p, props));
             }
         }
-        chosen.ok_or(vk::Result::ERROR_UNKNOWN)
+        chosen.ok_or_else(|| vk::Result::ERROR_UNKNOWN.into())
     }
 
     fn pick_queues(
@@ -248,7 +211,7 @@ impl Renderer {
         physical_device: &vk::PhysicalDevice,
         surface: &vk::SurfaceKHR,
         surface_loader: &khr::Surface,
-    ) -> VkResult<(u32, u32)> {
+    ) -> RendererResult<(u32, u32)> {
         let queue_family_properties =
             unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
         let mut g_index = None;
@@ -285,7 +248,7 @@ impl Renderer {
         layers: &[*const i8],
         graphics_queue_index: u32,
         transfer_queue_index: u32,
-    ) -> VkResult<Device> {
+    ) -> RendererResult<Device> {
         let device_extension_names = [ash::extensions::khr::Swapchain::name().as_ptr()];
         // create logical device
         let priorities = [1.0f32];
@@ -324,7 +287,7 @@ impl Renderer {
     fn create_render_pass(
         device: &Device,
         format: &vk::SurfaceFormatKHR,
-    ) -> VkResult<vk::RenderPass> {
+    ) -> RendererResult<vk::RenderPass> {
         let attachments = [
             vk::AttachmentDescription::builder()
                 .format(format.format)
@@ -378,7 +341,7 @@ impl Renderer {
             .attachments(&attachments)
             .subpasses(&subpasses)
             .dependencies(&subpass_dependencies);
-        unsafe { device.create_render_pass(&renderpass_info, None) }
+        unsafe { Ok(device.create_render_pass(&renderpass_info, None)?) }
     }
 
     fn create_framebuffers(
@@ -387,7 +350,7 @@ impl Renderer {
         depth_image_view: &vk::ImageView,
         extent: vk::Extent2D,
         render_pass: &vk::RenderPass,
-    ) -> VkResult<Vec<vk::Framebuffer>> {
+    ) -> RendererResult<Vec<vk::Framebuffer>> {
         // Since Result implements FromIterator, can collect directly into a result
         image_views
             .iter()
@@ -399,12 +362,16 @@ impl Renderer {
                     .width(extent.width)
                     .height(extent.height)
                     .layers(1);
-                unsafe { device.create_framebuffer(&framebuffer_info, None) }
+                unsafe {
+                    device
+                        .create_framebuffer(&framebuffer_info, None)
+                        .map_err(RendererError::VulkanError)
+                }
             })
             .collect()
     }
 
-    fn create_frame_data(device: &Device, num: usize) -> VkResult<Vec<FrameData>> {
+    fn create_frame_data(device: &Device, num: usize) -> RendererResult<Vec<FrameData>> {
         let semaphore_info = vk::SemaphoreCreateInfo::builder();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
         (0..num)
@@ -432,7 +399,7 @@ impl Renderer {
         uniform_buffer: &Buffer,
         light_buffer: &Buffer,
         num_textures: u32,
-    ) -> VkResult<(
+    ) -> RendererResult<(
         Vec<vk::DescriptorSet>,
         Vec<vk::DescriptorSet>,
         Vec<vk::DescriptorSet>,
@@ -725,8 +692,7 @@ impl Renderer {
                 0,
             )?;
 
-        let text = TextHandler::new(&device, &swapchain, &render_pass, "Roboto-Regular.ttf")
-            .expect("Create Text Handler");
+        let text = TextHandler::new(&device, "Roboto-Regular.ttf")?;
 
         Ok(Renderer {
             dropped: false,
@@ -764,7 +730,7 @@ impl Renderer {
         })
     }
 
-    pub fn recreate_swapchain(&mut self, width: u32, height: u32) -> VkResult<()> {
+    pub fn recreate_swapchain(&mut self, width: u32, height: u32) -> RendererResult<()> {
         unsafe {
             self.device.device_wait_idle()?;
         }
@@ -832,7 +798,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn wait_for_next_frame_fence(&self) -> VkResult<()> {
+    fn wait_for_next_frame_fence(&self) -> RendererResult<()> {
         unsafe {
             self.device.wait_for_fences(
                 &[self.frame_data[self.current_image].in_flight_fence],
@@ -843,7 +809,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn wait_for_image_fence_and_set_new_fence(&mut self, image_index: usize) -> VkResult<()> {
+    fn wait_for_image_fence_and_set_new_fence(&mut self, image_index: usize) -> RendererResult<()> {
         if self.images_in_flight[image_index] != vk::Fence::null() {
             unsafe {
                 self.device.wait_for_fences(
@@ -858,7 +824,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn update_command_buffer(&self, image_index: usize) -> VkResult<()> {
+    fn update_command_buffer(&self, image_index: usize) -> RendererResult<()> {
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
         let cmd_buf = &self.command_buffers[image_index];
         let framebuffer = &self.framebuffers[image_index];
@@ -920,7 +886,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn submit_commands(&mut self, image_index: usize) -> VkResult<()> {
+    fn submit_commands(&mut self, image_index: usize) -> RendererResult<()> {
         let cmd_buf = &self.command_buffers[image_index];
         let this_frame_data = &self.frame_data[self.current_image];
         let semaphores_available = [this_frame_data.image_available_semaphore];
@@ -953,7 +919,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn present(&self, image_index: u32) -> VkResult<()> {
+    fn present(&self, image_index: u32) -> RendererResult<()> {
         self.swapchain.present(
             &self.graphics_queue,
             &self.frame_data[self.current_image].render_finished_semaphore,
@@ -979,42 +945,42 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update_uniforms_from_camera(&mut self, camera: &Camera) -> VkResult<()> {
+    pub fn update_uniforms_from_camera(&mut self, camera: &Camera) -> RendererResult<()> {
         if let Some(alloc) = &mut self.allocator {
-            camera.update_buffer(alloc, &mut self.uniform_buffer)
+            Ok(camera.update_buffer(alloc, &mut self.uniform_buffer)?)
         } else {
             panic!("No allocator!");
         }
     }
 
-    pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> VkResult<()> {
+    pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> RendererResult<()> {
         if let Some(alloc) = &mut self.allocator {
-            lights.update_buffer(
+            Ok(lights.update_buffer(
                 &self.device,
                 alloc,
                 &mut self.light_buffer,
                 &mut self.descriptor_sets_lights[..],
-            )
+            )?)
         } else {
             panic!("No allocator!");
         }
     }
 
-    pub fn new_texture_from_file<P: AsRef<Path>>(&mut self, path: P) -> VkResult<usize> {
+    pub fn new_texture_from_file<P: AsRef<Path>>(&mut self, path: P) -> RendererResult<usize> {
         if let Some(allo) = &mut self.allocator {
-            self.texture_storage.new_texture_from_file(
+            Ok(self.texture_storage.new_texture_from_file(
                 path,
                 &self.device,
                 allo,
                 self.graphics_command_pool,
                 self.graphics_queue,
-            )
+            )?)
         } else {
             panic!("No allocator!");
         }
     }
 
-    pub fn update_textures(&mut self) -> VkResult<()> {
+    pub fn update_textures(&mut self) -> RendererResult<()> {
         let num_texs = self.texture_storage.get_number_of_textures() as u32;
         if self.number_of_textures < num_texs {
             self.graphics_pipeline.destroy();
@@ -1072,7 +1038,7 @@ impl Renderer {
         position: (u32, u32),
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> RendererResult<()> {
         let letters = self.text.create_letters(styles, color);
         if let Some(allo) = &mut self.allocator {
             self.text.create_vertex_data(
@@ -1085,13 +1051,13 @@ impl Renderer {
                 &self.graphics_command_pool,
                 &self.graphics_queue,
                 &self.swapchain,
-            );
+            )?;
             self.text.update_vertex_buffer(&self.device, allo)?;
         }
         Ok(())
     }
 
-    pub fn screenshot(&mut self) -> VkResult<()> {
+    pub fn screenshot(&mut self) -> RendererResult<()> {
         let command_buffer_alloc_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(self.graphics_command_pool)
             .command_buffer_count(1);

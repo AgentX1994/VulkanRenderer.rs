@@ -1,9 +1,8 @@
-use ash::prelude::VkResult;
 use gpu_allocator::vulkan::Allocator;
 use nalgebra as na;
 use nalgebra_glm as glm;
 
-use super::buffer::Buffer;
+use super::{buffer::Buffer, RendererResult};
 
 pub struct CameraBuilder {
     position: glm::Vec3,
@@ -210,7 +209,7 @@ impl Camera {
         &self,
         allocator: &mut Allocator,
         buffer: &mut Buffer,
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         let data_array: [[[f32; 4]; 4]; 2] =
             [self.view_matrix.into(), self.projection_matrix.into()];
         let bytes = std::mem::size_of::<[[[f32; 4]; 4]; 2]>();

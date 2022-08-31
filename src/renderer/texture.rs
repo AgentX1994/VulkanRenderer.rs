@@ -1,10 +1,10 @@
-use ash::{prelude::VkResult, vk, Device};
+use ash::{vk, Device};
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, Allocator},
     MemoryLocation,
 };
 
-use super::buffer::Buffer;
+use super::{buffer::Buffer, RendererResult};
 
 pub struct Texture {
     image: image::RgbaImage,
@@ -21,7 +21,7 @@ impl Texture {
         allocator: &mut Allocator,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
-    ) -> VkResult<Self> {
+    ) -> RendererResult<Self> {
         // Load image from file
         let image = image::open(path)
             .map(|img| img.into_rgba8())
@@ -51,8 +51,7 @@ impl Texture {
                 requirements: reqs,
                 location: MemoryLocation::GpuOnly,
                 linear: false,
-            })
-            .unwrap();
+            })?;
         unsafe {
             device.bind_image_memory(vk_image, allocation.memory(), allocation.offset())?;
         };
@@ -236,7 +235,7 @@ impl TextureStorage {
         allocator: &mut Allocator,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
-    ) -> VkResult<usize> {
+    ) -> RendererResult<usize> {
         let texture = Texture::from_file(path, device, allocator, command_pool, queue)?;
         let new_id = self.textures.len();
         self.textures.push(texture);

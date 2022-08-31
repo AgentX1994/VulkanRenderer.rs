@@ -1,9 +1,9 @@
-use ash::{prelude::VkResult, vk, Device};
+use ash::{vk, Device};
 use gpu_allocator::vulkan::Allocator;
 use nalgebra as na;
 use nalgebra_glm as glm;
 
-use super::buffer::Buffer;
+use super::{buffer::Buffer, RendererResult};
 
 #[derive(Debug)]
 pub struct DirectionalLight {
@@ -58,7 +58,7 @@ impl LightManager {
         allocator: &mut Allocator,
         buffer: &mut Buffer,
         descriptor_sets_lights: &mut [vk::DescriptorSet],
-    ) -> VkResult<()> {
+    ) -> RendererResult<()> {
         // 0.0s are for padding
         let mut data_vec: Vec<f32> = vec![
             self.directional_lights.len() as f32,

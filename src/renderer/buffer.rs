@@ -1,7 +1,8 @@
-use ash::prelude::VkResult;
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 use gpu_allocator::MemoryLocation;
+
+use super::RendererResult;
 
 pub struct Buffer {
     device: ash::Device,
@@ -19,7 +20,7 @@ impl Buffer {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
-    ) -> VkResult<(vk::Buffer, Allocation)> {
+    ) -> RendererResult<(vk::Buffer, Allocation)> {
         let buffer_create_info = vk::BufferCreateInfo::builder()
             .size(size)
             .usage(buffer_usage);
@@ -32,8 +33,7 @@ impl Buffer {
                 requirements: reqs,
                 location,
                 linear: true,
-            })
-            .unwrap(); // TODO error handling
+            })?;
 
         unsafe {
             device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())?;
@@ -47,7 +47,7 @@ impl Buffer {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
-    ) -> VkResult<Buffer> {
+    ) -> RendererResult<Buffer> {
         let (buffer, allocation) =
             Self::allocate_new_buffer(device, allocator, size, buffer_usage, location)?;
         Ok(Buffer {
@@ -60,7 +60,7 @@ impl Buffer {
         })
     }
 
-    pub fn fill(&mut self, allocator: &mut Allocator, data: &[u8]) -> VkResult<()> {
+    pub fn fill(&mut self, allocator: &mut Allocator, data: &[u8]) -> RendererResult<()> {
         if data.len() != self.size as usize {
             let (buffer, allocation) = Self::allocate_new_buffer(
                 &self.device,
