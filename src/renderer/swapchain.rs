@@ -1,10 +1,11 @@
 use ash::extensions::khr;
 use ash::vk;
-use ash::{Device, Instance};
+use ash::Device;
 
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 use gpu_allocator::MemoryLocation;
 
+use super::context::VulkanContext;
 use super::RendererResult;
 
 pub struct Swapchain {
@@ -53,28 +54,13 @@ impl Swapchain {
     }
 
     pub fn new(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        device: &Device,
-        surface: &vk::SurfaceKHR,
-        surface_loader: &khr::Surface,
-        graphics_queue_index: u32,
+        context: &VulkanContext,
         allocator: &mut Allocator,
         width: u32,
-        height: u32
+        height: u32,
     ) -> RendererResult<Self> {
-        // Get capabilities of the surface
-        let surface_capabilities = unsafe {
-            surface_loader.get_physical_device_surface_capabilities(*physical_device, *surface)?
-        };
-        let _surface_present_modes = unsafe {
-            surface_loader.get_physical_device_surface_present_modes(*physical_device, *surface)?
-        };
-        let surface_formats = unsafe {
-            surface_loader.get_physical_device_surface_formats(*physical_device, *surface)?
-        };
-
-        let format = surface_formats
+        let format = context
+            .surface_formats
             .iter()
             .find(|format| {
                 format.format == vk::Format::B8G8R8A8_SRGB
@@ -83,22 +69,32 @@ impl Swapchain {
             .ok_or(vk::Result::ERROR_FORMAT_NOT_SUPPORTED)?;
         let extent = vk::Extent2D {
             width: width
-                .min(surface_capabilities.max_image_extent.width)
-                .max(surface_capabilities.min_image_extent.width),
+                .min(context.surface_capabilities.max_image_extent.width)
+                .max(context.surface_capabilities.min_image_extent.width),
             height: height
-                .min(surface_capabilities.max_image_extent.height)
-                .max(surface_capabilities.min_image_extent.height),
+                .min(context.surface_capabilities.max_image_extent.height)
+                .max(context.surface_capabilities.min_image_extent.height),
         };
-        let queue_families = [graphics_queue_index];
-        let min_image_count = 3.min(surface_capabilities.min_image_count).max(
-            if surface_capabilities.max_image_count == 0 {
-                surface_capabilities.min_image_count
+        let queue_families = [context.graphics_queue.index];
+        let min_image_count = 3.min(context.surface_capabilities.min_image_count).max(
+            if context.surface_capabilities.max_image_count == 0 {
+                context.surface_capabilities.min_image_count
             } else {
-                surface_capabilities.max_image_count
+                context.surface_capabilities.max_image_count
             },
         );
+        let present_mode = {
+            if context
+                .surface_present_modes
+                .contains(&vk::PresentModeKHR::MAILBOX)
+            {
+                vk::PresentModeKHR::MAILBOX
+            } else {
+                vk::PresentModeKHR::FIFO
+            }
+        };
         let swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
-            .surface(*surface)
+            .surface(context.surface)
             .min_image_count(min_image_count)
             .image_format(format.format)
             .image_color_space(format.color_space)
@@ -107,15 +103,16 @@ impl Swapchain {
             .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
             .queue_family_indices(&queue_families)
-            .pre_transform(surface_capabilities.current_transform)
+            .pre_transform(context.surface_capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
-            .present_mode(vk::PresentModeKHR::FIFO);
-        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
+            .present_mode(present_mode);
+        let swapchain_loader =
+            ash::extensions::khr::Swapchain::new(&context.instance, &context.device);
         let swapchain = unsafe { swapchain_loader.create_swapchain(&swapchain_create_info, None)? };
 
         // get images
         let images = unsafe { swapchain_loader.get_swapchain_images(swapchain)? };
-        let image_views = Self::create_image_views(device, format, &images[..]);
+        let image_views = Self::create_image_views(&context.device, format, &images[..]);
 
         // Create depth image
         let extent_3d = vk::Extent3D {
@@ -135,17 +132,16 @@ impl Swapchain {
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
             .queue_family_indices(&queue_families);
 
-        let depth_image = unsafe { device.create_image(&depth_image_info, None) }?;
-        let reqs = unsafe { device.get_image_memory_requirements(depth_image) };
-        let depth_image_allocation = allocator
-            .allocate(&AllocationCreateDesc {
-                name: "depth_image",
-                requirements: reqs,
-                location: MemoryLocation::GpuOnly,
-                linear: false,
-            })?;
+        let depth_image = unsafe { context.device.create_image(&depth_image_info, None) }?;
+        let reqs = unsafe { context.device.get_image_memory_requirements(depth_image) };
+        let depth_image_allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "depth_image",
+            requirements: reqs,
+            location: MemoryLocation::GpuOnly,
+            linear: false,
+        })?;
         unsafe {
-            device.bind_image_memory(
+            context.device.bind_image_memory(
                 depth_image,
                 depth_image_allocation.memory(),
                 depth_image_allocation.offset(),
@@ -163,10 +159,14 @@ impl Swapchain {
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(vk::Format::D32_SFLOAT)
             .subresource_range(*subresource_range);
-        let depth_image_view = unsafe { device.create_image_view(&image_view_create_info, None) }?;
+        let depth_image_view = unsafe {
+            context
+                .device
+                .create_image_view(&image_view_create_info, None)
+        }?;
 
         Ok(Swapchain {
-            device: device.clone(),
+            device: context.device.clone(),
             swapchain,
             swapchain_loader,
             min_image_count,

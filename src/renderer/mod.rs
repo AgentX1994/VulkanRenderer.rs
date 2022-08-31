@@ -1,10 +1,7 @@
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::c_void;
 use std::path::Path;
 
-use ash::extensions::ext;
-use ash::extensions::khr;
 use ash::vk;
-use ash::{Device, Instance};
 
 use gpu_allocator::MemoryLocation;
 use nalgebra_glm as glm;
@@ -13,10 +10,12 @@ use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc
 
 mod buffer;
 pub mod camera;
+mod context;
 pub mod error;
 pub mod light;
 pub mod model;
 mod pipeline;
+mod queue;
 mod shader_module;
 mod swapchain;
 mod text;
@@ -31,6 +30,7 @@ use shader_module::ShaderModule;
 use swapchain::Swapchain;
 use vertex::Vertex;
 
+use self::context::VulkanContext;
 use self::error::RendererError;
 use self::light::LightManager;
 use self::text::TextHandler;
@@ -38,28 +38,10 @@ use self::texture::TextureStorage;
 
 pub use error::RendererResult;
 
-unsafe extern "system" fn vulkan_debug_utils_callback(
-    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
-    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
-    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
-    _p_user_data: *mut c_void,
-) -> vk::Bool32 {
-    if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-        || message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-    {
-        return vk::FALSE;
-    }
-    let message = CStr::from_ptr((*p_callback_data).p_message);
-    let severity = format!("{:?}", message_severity).to_lowercase();
-    let ty = format!("{:?}", message_type).to_lowercase();
-    println!("[Debug][{}][{}] {:?}", severity, ty, message);
-    vk::FALSE
-}
-
 const FRAMES_IN_FLIGHT: usize = 2;
 
 struct FrameData {
-    device: Device,
+    device: ash::Device,
     image_available_semaphore: vk::Semaphore,
     render_finished_semaphore: vk::Semaphore,
     in_flight_fence: vk::Fence,
@@ -108,15 +90,8 @@ impl InstanceData {
 
 pub struct Renderer {
     dropped: bool,
-    _entry: ash::Entry,
+    pub context: VulkanContext,
     pub allocator: Option<Allocator>,
-    instance: Instance,
-    physical_device: vk::PhysicalDevice,
-    pub device: Device,
-    debug_utils: ext::DebugUtils,
-    utils_messenger: vk::DebugUtilsMessengerEXT,
-    surface: vk::SurfaceKHR,
-    surface_loader: khr::Surface,
     swapchain: Swapchain,
     framebuffers: Vec<vk::Framebuffer>,
     render_pass: vk::RenderPass,
@@ -124,8 +99,6 @@ pub struct Renderer {
     graphics_pipeline: GraphicsPipeline,
     graphics_command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
-    graphics_queue: vk::Queue,
-    graphics_queue_index: u32,
     frame_data: Vec<FrameData>,
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
@@ -142,150 +115,9 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    fn create_instance(
-        engine_name: &str,
-        app_name: &str,
-        entry: &ash::Entry,
-        layer_names: &[*const i8],
-        mut debug_create_info: vk::DebugUtilsMessengerCreateInfoEXT,
-        use_wayland: bool,
-    ) -> Result<ash::Instance, ash::vk::Result> {
-        // TODO Return errors
-        let engine_name_c = CString::new(engine_name).unwrap();
-        let app_name_c = CString::new(app_name).unwrap();
-
-        // Make Application Info
-        let app_info = vk::ApplicationInfo::builder()
-            .application_name(&app_name_c)
-            .application_version(vk::make_api_version(0, 0, 0, 1))
-            .engine_name(&engine_name_c)
-            .engine_version(vk::make_api_version(0, 0, 42, 0))
-            .api_version(vk::API_VERSION_1_3);
-
-        let mut instance_extension_names = vec![
-            ext::DebugUtils::name().as_ptr(),
-            khr::Surface::name().as_ptr(),
-        ];
-        #[cfg(target_os = "windows")]
-        {
-            instance_extension_names.push(khr::Win32Surface::name().as_ptr());
-        }
-        #[cfg(target_os = "linux")]
-        {
-            if use_wayland {
-                instance_extension_names.push(khr::WaylandSurface::name().as_ptr());
-            } else {
-                instance_extension_names.push(khr::XlibSurface::name().as_ptr());
-            }
-        }
-
-        // Create instance
-        let instance_create_info = vk::InstanceCreateInfo::builder()
-            .push_next(&mut debug_create_info)
-            .application_info(&app_info)
-            .enabled_layer_names(layer_names)
-            .enabled_extension_names(&instance_extension_names);
-
-        unsafe { entry.create_instance(&instance_create_info, None) }
-    }
-
-    fn pick_physical_device(
-        instance: &Instance,
-    ) -> RendererResult<(vk::PhysicalDevice, vk::PhysicalDeviceProperties)> {
-        // Physical Device
-        let phys_devs = unsafe { instance.enumerate_physical_devices()? };
-
-        let mut chosen = None;
-        for p in phys_devs {
-            let props = unsafe { instance.get_physical_device_properties(p) };
-            dbg!(props);
-            if chosen.is_none() {
-                chosen = Some((p, props));
-            }
-        }
-        chosen.ok_or_else(|| vk::Result::ERROR_UNKNOWN.into())
-    }
-
-    fn pick_queues(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        surface: &vk::SurfaceKHR,
-        surface_loader: &khr::Surface,
-    ) -> RendererResult<(u32, u32)> {
-        let queue_family_properties =
-            unsafe { instance.get_physical_device_queue_family_properties(*physical_device) };
-        let mut g_index = None;
-        let mut t_index = None;
-        for (i, qfam) in queue_family_properties.iter().enumerate() {
-            if qfam.queue_count > 0
-                && qfam.queue_flags.contains(vk::QueueFlags::GRAPHICS)
-                && unsafe {
-                    surface_loader.get_physical_device_surface_support(
-                        *physical_device,
-                        i as u32,
-                        *surface,
-                    )?
-                }
-            {
-                g_index = Some(i as u32);
-            }
-            if qfam.queue_count > 0
-                && qfam.queue_flags.contains(vk::QueueFlags::TRANSFER)
-                && (t_index.is_none() || !qfam.queue_flags.contains(vk::QueueFlags::GRAPHICS))
-            {
-                t_index = Some(i as u32);
-            }
-        }
-        Ok((
-            g_index.ok_or(vk::Result::ERROR_UNKNOWN)?,
-            t_index.ok_or(vk::Result::ERROR_UNKNOWN)?,
-        ))
-    }
-
-    fn create_logical_device(
-        instance: &Instance,
-        physical_device: &vk::PhysicalDevice,
-        layers: &[*const i8],
-        graphics_queue_index: u32,
-        transfer_queue_index: u32,
-    ) -> RendererResult<Device> {
-        let device_extension_names = [ash::extensions::khr::Swapchain::name().as_ptr()];
-        // create logical device
-        let priorities = [1.0f32];
-        let queue_infos = if graphics_queue_index != transfer_queue_index {
-            vec![
-                vk::DeviceQueueCreateInfo::builder()
-                    .queue_family_index(graphics_queue_index)
-                    .queue_priorities(&priorities)
-                    .build(),
-                vk::DeviceQueueCreateInfo::builder()
-                    .queue_family_index(transfer_queue_index)
-                    .queue_priorities(&priorities)
-                    .build(),
-            ]
-        } else {
-            vec![vk::DeviceQueueCreateInfo::builder()
-                .queue_family_index(graphics_queue_index)
-                .queue_priorities(&priorities)
-                .build()]
-        };
-
-        let mut indexing_features = vk::PhysicalDeviceDescriptorIndexingFeatures::builder()
-            .runtime_descriptor_array(true)
-            .descriptor_binding_variable_descriptor_count(true);
-
-        let device_create_info = vk::DeviceCreateInfo::builder()
-            .queue_create_infos(&queue_infos)
-            .enabled_extension_names(&device_extension_names)
-            .enabled_layer_names(layers)
-            .push_next(&mut indexing_features);
-        let device =
-            unsafe { instance.create_device(*physical_device, &device_create_info, None)? };
-        Ok(device)
-    }
 
     fn create_render_pass(
-        device: &Device,
+        device: &ash::Device,
         format: &vk::SurfaceFormatKHR,
     ) -> RendererResult<vk::RenderPass> {
         let attachments = [
@@ -345,7 +177,7 @@ impl Renderer {
     }
 
     fn create_framebuffers(
-        device: &Device,
+        device: &ash::Device,
         image_views: &[vk::ImageView],
         depth_image_view: &vk::ImageView,
         extent: vk::Extent2D,
@@ -371,7 +203,7 @@ impl Renderer {
             .collect()
     }
 
-    fn create_frame_data(device: &Device, num: usize) -> RendererResult<Vec<FrameData>> {
+    fn create_frame_data(device: &ash::Device, num: usize) -> RendererResult<Vec<FrameData>> {
         let semaphore_info = vk::SemaphoreCreateInfo::builder();
         let fence_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED);
         (0..num)
@@ -392,7 +224,7 @@ impl Renderer {
     }
 
     fn create_descriptor_sets(
-        device: &Device,
+        device: &ash::Device,
         pipeline: &GraphicsPipeline,
         pool: &vk::DescriptorPool,
         swapchain: &Swapchain,
@@ -486,85 +318,13 @@ impl Renderer {
         display: *mut c_void,
         use_wayland: bool,
     ) -> RendererResult<Self> {
-        // Layers
-        let layers = unsafe {
-            [CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()]
-        };
-
-        let entry = unsafe { ash::Entry::load()? };
-        // Messenger info
-        let debug_create_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-            .message_severity(
-                vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
-                    | vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-            )
-            .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                    | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-                    | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION,
-            )
-            .pfn_user_callback(Some(vulkan_debug_utils_callback));
-
-        let instance = Self::create_instance(
-            name,
-            "My Engine",
-            &entry,
-            &layers[..],
-            *debug_create_info,
-            use_wayland,
-        )?;
-
-        // Create debug messenger
-        let debug_utils = ext::DebugUtils::new(&entry, &instance);
-        let utils_messenger =
-            unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None)? };
-
-        #[cfg(not(target_os = "windows"))]
-        let surface = if use_wayland {
-            let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR::builder()
-                .display(display)
-                .surface(surface);
-            let wayland_surface_loader =
-                ash::extensions::khr::WaylandSurface::new(&entry, &instance);
-            unsafe { wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)? }
-        } else {
-            let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-                .window(surface as u64)
-                .dpy(display as *mut *const c_void);
-            let xlib_surface_loader = ash::extensions::khr::XlibSurface::new(&entry, &instance);
-            unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? }
-        };
-        #[cfg(target_os = "windows")]
-        let surface = {
-            let win32_create_info = vk::Win32SurfaceCreateInfoKHR::builder()
-                .hinstance(display)
-                .hwnd(surface);
-            let win32_surface_loader = ash::extensions::khr::Win32Surface::new(&entry, &instance);
-            unsafe { win32_surface_loader.create_win32_surface(&win32_create_info, None)? }
-        };
-
-        let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
-
-        let (physical_device, _physical_device_properties) = Self::pick_physical_device(&instance)?;
-        let (graphics_queue_index, transfer_queue_index) =
-            Self::pick_queues(&instance, &physical_device, &surface, &surface_loader)?;
-
-        let device = Self::create_logical_device(
-            &instance,
-            &physical_device,
-            &layers[..],
-            graphics_queue_index,
-            transfer_queue_index,
-        )?;
-        let graphics_queue = unsafe { device.get_device_queue(graphics_queue_index, 0) };
+        let context = VulkanContext::new(name, use_wayland, surface, display)?;
 
         // Allocator
         let mut allocator = Allocator::new(&AllocatorCreateDesc {
-            instance: instance.clone(),
-            device: device.clone(),
-            physical_device,
+            instance: context.instance.clone(),
+            device: context.device.clone(),
+            physical_device: context.physical_device,
             debug_settings: gpu_allocator::AllocatorDebugSettings {
                 log_memory_information: true,
                 log_leaks_on_shutdown: true,
@@ -579,20 +339,15 @@ impl Renderer {
                    // let allocator = vk_mem::Allocator::new(allocator_create_info)?;
 
         let swapchain = Swapchain::new(
-            &instance,
-            &physical_device,
-            &device,
-            &surface,
-            &surface_loader,
-            graphics_queue_index,
+            &context,
             &mut allocator,
             window_width,
             window_height,
         )?;
 
-        let render_pass = Self::create_render_pass(&device, &swapchain.get_image_format())?;
+        let render_pass = Self::create_render_pass(&context.device, &swapchain.get_image_format())?;
         let framebuffers = Self::create_framebuffers(
-            &device,
+            &context.device,
             swapchain.get_image_views(),
             swapchain.get_depth_image_view(),
             swapchain.get_extent(),
@@ -600,12 +355,12 @@ impl Renderer {
         )?;
 
         let shader_module = ShaderModule::new(
-            &device,
+            &context.device,
             vk_shader_macros::include_glsl!("./shaders/default.vert", kind: vert),
             vk_shader_macros::include_glsl!("./shaders/default.frag", kind: frag),
         )?;
         let graphics_pipeline = GraphicsPipeline::new(
-            &device,
+            &context.device,
             swapchain.get_extent(),
             &render_pass,
             shader_module.get_stages(),
@@ -616,25 +371,25 @@ impl Renderer {
 
         // Create command pools
         let graphics_commandpool_info = vk::CommandPoolCreateInfo::builder()
-            .queue_family_index(graphics_queue_index)
+            .queue_family_index(context.graphics_queue.index)
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER);
         let graphics_command_pool =
-            unsafe { device.create_command_pool(&graphics_commandpool_info, None)? };
+            unsafe { context.device.create_command_pool(&graphics_commandpool_info, None)? };
 
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(graphics_command_pool)
             .command_buffer_count(framebuffers.len() as u32);
         let command_buffers =
-            unsafe { device.allocate_command_buffers(&command_buffer_allocate_info)? };
+            unsafe { context.device.allocate_command_buffers(&command_buffer_allocate_info)? };
 
-        let frame_data = Self::create_frame_data(&device, FRAMES_IN_FLIGHT)?;
+        let frame_data = Self::create_frame_data(&context.device, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.get_actual_image_count() as usize];
 
         // Create uniform buffer
         let camera_transforms: [[[f32; 4]; 4]; 2] =
             [glm::Mat4::identity().into(), glm::Mat4::identity().into()];
         let mut uniform_buffer = Buffer::new(
-            &device,
+            &context.device,
             &mut allocator,
             std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
@@ -648,7 +403,7 @@ impl Renderer {
 
         // Create storage buffer for lights
         let mut light_buffer = Buffer::new(
-            &device,
+            &context.device,
             &mut allocator,
             8,
             vk::BufferUsageFlags::STORAGE_BUFFER,
@@ -679,11 +434,11 @@ impl Renderer {
             .pool_sizes(&pool_sizes)
             .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
         let descriptor_pool =
-            unsafe { device.create_descriptor_pool(&descriptor_pool_info, None)? };
+            unsafe { context.device.create_descriptor_pool(&descriptor_pool_info, None)? };
 
         let (descriptor_sets_camera, descriptor_sets_lights, descriptor_sets_texture) =
             Self::create_descriptor_sets(
-                &device,
+                &context.device,
                 &graphics_pipeline,
                 &descriptor_pool,
                 &swapchain,
@@ -692,19 +447,12 @@ impl Renderer {
                 0,
             )?;
 
-        let text = TextHandler::new(&device, "Roboto-Regular.ttf")?;
+        let text = TextHandler::new(&context.device, "Roboto-Regular.ttf")?;
 
         Ok(Renderer {
             dropped: false,
-            _entry: entry,
-            instance,
+            context,
             allocator: Some(allocator),
-            physical_device,
-            device,
-            debug_utils,
-            utils_messenger,
-            surface,
-            surface_loader,
             swapchain,
             graphics_command_pool,
             command_buffers,
@@ -712,8 +460,6 @@ impl Renderer {
             framebuffers,
             shader_module,
             graphics_pipeline,
-            graphics_queue,
-            graphics_queue_index,
             frame_data,
             images_in_flight,
             current_image: 0,
@@ -732,29 +478,25 @@ impl Renderer {
 
     pub fn recreate_swapchain(&mut self, width: u32, height: u32) -> RendererResult<()> {
         unsafe {
-            self.device.device_wait_idle()?;
+            self.context.device.device_wait_idle()?;
         }
+        self.context.refresh_surface_data()?;
         if let Some(allo) = &mut self.allocator {
             unsafe {
                 for fb in self.framebuffers.iter() {
-                    self.device.destroy_framebuffer(*fb, None);
+                    self.context.device.destroy_framebuffer(*fb, None);
                 }
             }
             self.framebuffers.clear();
             self.swapchain.destroy(allo);
             self.swapchain = Swapchain::new(
-                &self.instance,
-                &self.physical_device,
-                &self.device,
-                &self.surface,
-                &self.surface_loader,
-                self.graphics_queue_index,
+                &self.context,
                 allo,
                 width,
                 height,
             )?;
             self.framebuffers = Self::create_framebuffers(
-                &self.device,
+                &self.context.device,
                 self.swapchain.get_image_views(),
                 self.swapchain.get_depth_image_view(),
                 self.swapchain.get_extent(),
@@ -762,7 +504,7 @@ impl Renderer {
             )?;
             self.graphics_pipeline.destroy();
             self.graphics_pipeline = GraphicsPipeline::new(
-                &self.device,
+                &self.context.device,
                 self.swapchain.get_extent(),
                 &self.render_pass,
                 self.shader_module.get_stages(),
@@ -771,15 +513,15 @@ impl Renderer {
                 self.number_of_textures,
             )?;
             unsafe {
-                self.device
+                self.context.device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_camera)?;
-                self.device
+                self.context.device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_lights)?;
-                self.device
+                self.context.device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)?;
             }
             let (a, b, c) = Self::create_descriptor_sets(
-                &self.device,
+                &self.context.device,
                 &self.graphics_pipeline,
                 &self.descriptor_pool,
                 &self.swapchain,
@@ -793,14 +535,14 @@ impl Renderer {
             self.update_textures()?;
             self.text.clear_pipeline();
             self.text
-                .update_textures(&self.render_pass, &self.swapchain, &self.device)?;
+                .update_textures(&self.render_pass, &self.swapchain, &self.context.device)?;
         }
         Ok(())
     }
 
     fn wait_for_next_frame_fence(&self) -> RendererResult<()> {
         unsafe {
-            self.device.wait_for_fences(
+            self.context.device.wait_for_fences(
                 &[self.frame_data[self.current_image].in_flight_fence],
                 true,
                 std::u64::MAX,
@@ -812,7 +554,7 @@ impl Renderer {
     fn wait_for_image_fence_and_set_new_fence(&mut self, image_index: usize) -> RendererResult<()> {
         if self.images_in_flight[image_index] != vk::Fence::null() {
             unsafe {
-                self.device.wait_for_fences(
+                self.context.device.wait_for_fences(
                     &[self.images_in_flight[image_index]],
                     true,
                     std::u64::MAX,
@@ -829,7 +571,7 @@ impl Renderer {
         let cmd_buf = &self.command_buffers[image_index];
         let framebuffer = &self.framebuffers[image_index];
         unsafe {
-            self.device
+            self.context.device
                 .begin_command_buffer(*cmd_buf, &command_buffer_begin_info)?;
         }
         let clear_values = [
@@ -854,17 +596,17 @@ impl Renderer {
             })
             .clear_values(&clear_values);
         unsafe {
-            self.device.cmd_begin_render_pass(
+            self.context.device.cmd_begin_render_pass(
                 *cmd_buf,
                 &render_pass_begin_info,
                 vk::SubpassContents::INLINE,
             );
-            self.device.cmd_bind_pipeline(
+            self.context.device.cmd_bind_pipeline(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.pipeline,
             );
-            self.device.cmd_bind_descriptor_sets(
+            self.context.device.cmd_bind_descriptor_sets(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
                 self.graphics_pipeline.pipeline_layout,
@@ -877,11 +619,11 @@ impl Renderer {
                 &[],
             );
             for m in &self.models {
-                m.draw(&self.device, *cmd_buf);
+                m.draw(&self.context.device, *cmd_buf);
             }
-            self.text.draw(&self.device, *cmd_buf, image_index);
-            self.device.cmd_end_render_pass(*cmd_buf);
-            self.device.end_command_buffer(*cmd_buf)?;
+            self.text.draw(&self.context.device, *cmd_buf, image_index);
+            self.context.device.cmd_end_render_pass(*cmd_buf);
+            self.context.device.end_command_buffer(*cmd_buf)?;
         }
         Ok(())
     }
@@ -900,18 +642,18 @@ impl Renderer {
             .signal_semaphores(&semaphores_finished)
             .build()];
         unsafe {
-            self.device
+            self.context.device
                 .reset_fences(&[this_frame_data.in_flight_fence])?;
             self.update_command_buffer(image_index)?;
             if let Some(alloc) = &mut self.allocator {
                 for m in &mut self.models {
-                    m.update_instance_buffer(&self.device, alloc)?;
+                    m.update_instance_buffer(&self.context.device, alloc)?;
                 }
             } else {
                 panic!("No allocator!");
             }
-            self.device.queue_submit(
-                self.graphics_queue,
+            self.context.device.queue_submit(
+                self.context.graphics_queue.queue,
                 &submit_info,
                 this_frame_data.in_flight_fence,
             )?;
@@ -921,7 +663,7 @@ impl Renderer {
 
     fn present(&self, image_index: u32) -> RendererResult<()> {
         self.swapchain.present(
-            &self.graphics_queue,
+            &self.context.graphics_queue.queue,
             &self.frame_data[self.current_image].render_finished_semaphore,
             image_index,
         )?;
@@ -956,7 +698,7 @@ impl Renderer {
     pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> RendererResult<()> {
         if let Some(alloc) = &mut self.allocator {
             Ok(lights.update_buffer(
-                &self.device,
+                &self.context.device,
                 alloc,
                 &mut self.light_buffer,
                 &mut self.descriptor_sets_lights[..],
@@ -970,10 +712,10 @@ impl Renderer {
         if let Some(allo) = &mut self.allocator {
             Ok(self.texture_storage.new_texture_from_file(
                 path,
-                &self.device,
+                &self.context.device,
                 allo,
                 self.graphics_command_pool,
-                self.graphics_queue,
+                self.context.graphics_queue.queue,
             )?)
         } else {
             panic!("No allocator!");
@@ -985,7 +727,7 @@ impl Renderer {
         if self.number_of_textures < num_texs {
             self.graphics_pipeline.destroy();
             self.graphics_pipeline = GraphicsPipeline::new(
-                &self.device,
+                &self.context.device,
                 self.swapchain.get_extent(),
                 &self.render_pass,
                 self.shader_module.get_stages(),
@@ -994,7 +736,7 @@ impl Renderer {
                 num_texs,
             )?;
             unsafe {
-                self.device
+                self.context.device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)
             }?;
             let descriptor_layouts_texture = vec![
@@ -1011,7 +753,7 @@ impl Renderer {
                 .set_layouts(&descriptor_layouts_texture)
                 .push_next(&mut variable_descriptor_allocate_info_texture);
             self.descriptor_sets_texture = unsafe {
-                self.device
+                self.context.device
                     .allocate_descriptor_sets(&descriptor_set_allocate_info_texture)?
             };
             self.number_of_textures = num_texs;
@@ -1026,7 +768,7 @@ impl Renderer {
                 .image_info(&image_info)
                 .build()];
             unsafe {
-                self.device.update_descriptor_sets(&desc_sets_write, &[]);
+                self.context.device.update_descriptor_sets(&desc_sets_write, &[]);
             }
         }
         Ok(())
@@ -1045,14 +787,14 @@ impl Renderer {
                 letters,
                 position,
                 window,
-                &self.device,
+                &self.context.device,
                 allo,
                 &self.render_pass,
                 &self.graphics_command_pool,
-                &self.graphics_queue,
+                &self.context.graphics_queue.queue,
                 &self.swapchain,
             )?;
-            self.text.update_vertex_buffer(&self.device, allo)?;
+            self.text.update_vertex_buffer(&self.context.device, allo)?;
         }
         Ok(())
     }
@@ -1062,14 +804,14 @@ impl Renderer {
             .command_pool(self.graphics_command_pool)
             .command_buffer_count(1);
         let copy_buffer = unsafe {
-            self.device
+            self.context.device
                 .allocate_command_buffers(&command_buffer_alloc_info)
         }?[0];
 
         let cmd_begin_info = vk::CommandBufferBeginInfo::builder()
             .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
         unsafe {
-            self.device
+            self.context.device
                 .begin_command_buffer(copy_buffer, &cmd_begin_info)
         }?;
 
@@ -1088,8 +830,8 @@ impl Renderer {
             .usage(vk::ImageUsageFlags::TRANSFER_DST)
             .initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let dest_image = unsafe { self.device.create_image(&image_create_info, None) }?;
-        let reqs = unsafe { self.device.get_image_memory_requirements(dest_image) };
+        let dest_image = unsafe { self.context.device.create_image(&image_create_info, None) }?;
+        let reqs = unsafe { self.context.device.get_image_memory_requirements(dest_image) };
 
         let dest_image_allocation = if let Some(allocator) = &mut self.allocator {
             allocator
@@ -1104,7 +846,7 @@ impl Renderer {
             panic!("No allocator!");
         };
         unsafe {
-            self.device.bind_image_memory(
+            self.context.device.bind_image_memory(
                 dest_image,
                 dest_image_allocation.memory(),
                 dest_image_allocation.offset(),
@@ -1128,7 +870,7 @@ impl Renderer {
                 })
                 .build();
             unsafe {
-                self.device.cmd_pipeline_barrier(
+                self.context.device.cmd_pipeline_barrier(
                     copy_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -1156,7 +898,7 @@ impl Renderer {
                 })
                 .build();
             unsafe {
-                self.device.cmd_pipeline_barrier(
+                self.context.device.cmd_pipeline_barrier(
                     copy_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -1192,7 +934,7 @@ impl Renderer {
             })
             .build();
         unsafe {
-            self.device.cmd_copy_image(
+            self.context.device.cmd_copy_image(
                 copy_buffer,
                 source_image,
                 vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -1218,7 +960,7 @@ impl Renderer {
                 })
                 .build();
             unsafe {
-                self.device.cmd_pipeline_barrier(
+                self.context.device.cmd_pipeline_barrier(
                     copy_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -1245,7 +987,7 @@ impl Renderer {
                 })
                 .build();
             unsafe {
-                self.device.cmd_pipeline_barrier(
+                self.context.device.cmd_pipeline_barrier(
                     copy_buffer,
                     vk::PipelineStageFlags::TRANSFER,
                     vk::PipelineStageFlags::TRANSFER,
@@ -1258,26 +1000,26 @@ impl Renderer {
         }
 
         unsafe {
-            self.device.end_command_buffer(copy_buffer)?;
+            self.context.device.end_command_buffer(copy_buffer)?;
         }
 
         let submit_infos = [vk::SubmitInfo::builder()
             .command_buffers(&[copy_buffer])
             .build()];
         let fence = unsafe {
-            self.device
+            self.context.device
                 .create_fence(&vk::FenceCreateInfo::default(), None)
         }?;
         unsafe {
-            self.device
-                .queue_submit(self.graphics_queue, &submit_infos, fence)
+            self.context.device
+                .queue_submit(self.context.graphics_queue.queue, &submit_infos, fence)
         }?;
 
-        unsafe { self.device.wait_for_fences(&[fence], true, std::u64::MAX) }?;
+        unsafe { self.context.device.wait_for_fences(&[fence], true, std::u64::MAX) }?;
 
-        unsafe { self.device.destroy_fence(fence, None) };
+        unsafe { self.context.device.destroy_fence(fence, None) };
         unsafe {
-            self.device
+            self.context.device
                 .free_command_buffers(self.graphics_command_pool, &[copy_buffer])
         };
 
@@ -1288,7 +1030,7 @@ impl Renderer {
                 .as_ptr() as *mut u8;
 
             let subresource_layout = unsafe {
-                self.device.get_image_subresource_layout(
+                self.context.device.get_image_subresource_layout(
                     dest_image,
                     vk::ImageSubresource {
                         aspect_mask: vk::ImageAspectFlags::COLOR,
@@ -1312,7 +1054,7 @@ impl Renderer {
                     .expect("Could not free dest image");
             }
             unsafe {
-                self.device.destroy_image(dest_image, None);
+                self.context.device.destroy_image(dest_image, None);
             }
             data
         };
@@ -1354,11 +1096,11 @@ impl Drop for Renderer {
             return;
         }
         unsafe {
-            self.device
+            self.context.device
                 .device_wait_idle()
                 .expect("Something wrong while waiting for idle");
 
-            self.device
+            self.context.device
                 .destroy_descriptor_pool(self.descriptor_pool, None);
 
             let mut allocator = self.allocator.take().expect("We had no allocator?!");
@@ -1375,26 +1117,21 @@ impl Drop for Renderer {
             }
             self.uniform_buffer.destroy(&mut allocator);
             self.light_buffer.destroy(&mut allocator);
-            self.texture_storage.clean_up(&self.device, &mut allocator);
+            self.texture_storage.clean_up(&self.context.device, &mut allocator);
 
             self.frame_data.clear();
-            self.device
+            self.context.device
                 .destroy_command_pool(self.graphics_command_pool, None);
             // device.destroy_command_pool(command_pool_transfer, None);
             self.graphics_pipeline.destroy();
             for fb in self.framebuffers.iter() {
-                self.device.destroy_framebuffer(*fb, None);
+                self.context.device.destroy_framebuffer(*fb, None);
             }
-            self.text.destroy(&self.device, &mut allocator);
-            self.device.destroy_render_pass(self.render_pass, None);
+            self.text.destroy(&self.context.device, &mut allocator);
+            self.context.device.destroy_render_pass(self.render_pass, None);
             self.swapchain.destroy(&mut allocator);
-            self.surface_loader.destroy_surface(self.surface, None);
             self.shader_module.destroy();
             drop(allocator); // Ensure all memory is freed
-            self.device.destroy_device(None);
-            self.debug_utils
-                .destroy_debug_utils_messenger(self.utils_messenger, None);
-            self.instance.destroy_instance(None);
         }
         self.dropped = true;
     }

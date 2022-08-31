@@ -17,7 +17,7 @@ use nalgebra_glm as glm;
 use vulkan_rust::renderer::model::Model;
 use vulkan_rust::renderer::vertex::Vertex;
 use vulkan_rust::renderer::InstanceData;
-use vulkan_rust::renderer::{Renderer, error::RendererError};
+use vulkan_rust::renderer::{error::RendererError, Renderer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
@@ -84,9 +84,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if let Some(allo) = &mut renderer.allocator {
-        sphere.update_vertex_buffer(&renderer.device, allo)?;
-        sphere.update_index_buffer(&renderer.device, allo)?;
-        sphere.update_instance_buffer(&renderer.device, allo)?;
+        // TODO how to structure this properly?
+        sphere.update_vertex_buffer(&renderer.context.device, allo)?;
+        sphere.update_index_buffer(&renderer.context.device, allo)?;
+        sphere.update_instance_buffer(&renderer.context.device, allo)?;
     }
     renderer.models = vec![sphere];
 
@@ -107,8 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         position: na::Point3::new(1.5, 0.2, 0.0),
         luminous_flux: glm::Vec3::new(5.0, 5.0, 5.0),
     });
-    renderer
-        .update_storage_from_lights(&lights)?;
+    renderer.update_storage_from_lights(&lights)?;
 
     let mut camera = Camera::builder().build();
 
@@ -149,7 +149,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
         [0.6, 0.6, 0.6],
     )?;
-
 
     // Run event loop
     let mut running = true;
@@ -254,6 +253,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     renderer.screenshot().expect("Could not take screenshot");
                     println!("Screenshotted!");
                 }
+            }
+            winit::event::VirtualKeyCode::Escape => {
+                running = false;
+                *controlflow = winit::event_loop::ControlFlow::Exit;
             }
             _ => {}
         },
