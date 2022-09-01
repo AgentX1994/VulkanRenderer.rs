@@ -71,7 +71,7 @@ impl Buffer {
             )?;
             let old_allocation = self.allocation.take().expect("Buffer had no allocation!");
             unsafe {
-                allocator.free(old_allocation).unwrap();
+                allocator.free(old_allocation)?;
                 self.device.destroy_buffer(self.buffer, None);
             }
             self.buffer = buffer;

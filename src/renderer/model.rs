@@ -334,6 +334,7 @@ impl<V, I> Model<V, I> {
 
     pub fn insert_visibly(&mut self, element: I) -> usize {
         let new_handle = self.insert(element);
+        // We just inserted this element, we know it exists
         self.make_visible(new_handle).unwrap();
         new_handle
     }
@@ -347,6 +348,7 @@ impl<V, I> Model<V, I> {
             self.swap_by_index(self.first_invisible, self.instances.len() - 1);
             self.handles.pop();
             self.handle_to_index.remove(&handle);
+            // Instances should always have something to pop
             Ok(self.instances.pop().unwrap())
         } else {
             Err(InvalidHandle.into())

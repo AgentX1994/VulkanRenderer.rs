@@ -55,8 +55,7 @@ impl TextTexture {
                 requirements: reqs,
                 location: MemoryLocation::GpuOnly,
                 linear: false,
-            })
-            .unwrap();
+            })?;
 
         // bind memory to image
         unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset()) }?;
@@ -506,6 +505,7 @@ impl TextHandler {
         self.descriptor_pool = Some(descriptor_pool);
 
         let desc_layouts_text = vec![
+            // This pipeline has to exist, so we know this will succeed
             self.pipeline.as_ref().unwrap().descriptor_set_layouts[0];
             swapchain.get_actual_image_count() as usize
         ];
