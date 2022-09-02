@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 ash = "0.37"
+rand = "0.8.5"
 winit = "0.27"
 env_logger = "0.9"
 vk-shader-macros = "0.2.8"

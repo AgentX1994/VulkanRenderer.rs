@@ -60,12 +60,13 @@ impl Buffer {
         })
     }
 
-    pub fn fill(&mut self, allocator: &mut Allocator, data: &[u8]) -> RendererResult<()> {
-        if data.len() != self.size as usize {
+    pub fn fill<T>(&mut self, allocator: &mut Allocator, data: &[T]) -> RendererResult<()> {
+        let data_len = data.len() * std::mem::size_of::<T>();
+        if data_len > self.size as usize {
             let (buffer, allocation) = Self::allocate_new_buffer(
                 &self.device,
                 allocator,
-                data.len() as u64,
+                data_len as u64,
                 self.buffer_usage,
                 self.location,
             )?;
@@ -76,11 +77,11 @@ impl Buffer {
             }
             self.buffer = buffer;
             self.allocation = Some(allocation);
-            self.size = data.len() as u64;
+            self.size = data_len as u64;
         }
         if let Some(allocation) = &self.allocation {
             let data_ptr = allocation.mapped_ptr().unwrap().as_ptr() as *mut u8;
-            unsafe { data_ptr.copy_from_nonoverlapping(data.as_ptr(), self.size as usize) };
+            unsafe { data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, self.size as usize) };
         } else { 
             panic!("Buffer had no allocation!");
         }

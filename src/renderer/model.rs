@@ -361,11 +361,7 @@ impl<V, I> Model<V, I> {
         allocator: &mut Allocator,
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.vertex_buffer {
-            let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
-            let data = unsafe {
-                std::slice::from_raw_parts(self.vertex_data.as_ptr() as *const u8, bytes)
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.vertex_data)?;
             Ok(())
         } else {
             let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
@@ -376,10 +372,7 @@ impl<V, I> Model<V, I> {
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 MemoryLocation::CpuToGpu,
             )?;
-            let data = unsafe {
-                std::slice::from_raw_parts(self.vertex_data.as_ptr() as *const u8, bytes)
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.vertex_data)?;
             self.vertex_buffer = Some(buffer);
             Ok(())
         }
@@ -391,10 +384,7 @@ impl<V, I> Model<V, I> {
         allocator: &mut Allocator,
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.index_buffer {
-            let bytes = self.vertex_data.len() * std::mem::size_of::<u32>();
-            let data =
-                unsafe { std::slice::from_raw_parts(self.index_data.as_ptr() as *const u8, bytes) };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.index_data)?;
             Ok(())
         } else {
             let bytes = self.index_data.len() * std::mem::size_of::<u32>();
@@ -405,9 +395,7 @@ impl<V, I> Model<V, I> {
                 vk::BufferUsageFlags::INDEX_BUFFER,
                 MemoryLocation::CpuToGpu,
             )?;
-            let data =
-                unsafe { std::slice::from_raw_parts(self.index_data.as_ptr() as *const u8, bytes) };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.index_data)?;
             self.index_buffer = Some(buffer);
             Ok(())
         }
@@ -419,14 +407,7 @@ impl<V, I> Model<V, I> {
         allocator: &mut Allocator,
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.instance_buffer {
-            let bytes = self.first_invisible * std::mem::size_of::<I>();
-            let data = unsafe {
-                std::slice::from_raw_parts(
-                    self.instances[0..self.first_invisible].as_ptr() as *const u8,
-                    bytes,
-                )
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.instances[0..self.first_invisible])?;
             Ok(())
         } else {
             let bytes = self.first_invisible * std::mem::size_of::<I>();
@@ -437,13 +418,7 @@ impl<V, I> Model<V, I> {
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 MemoryLocation::CpuToGpu,
             )?;
-            let data = unsafe {
-                std::slice::from_raw_parts(
-                    self.instances[0..self.first_invisible].as_ptr() as *const u8,
-                    bytes,
-                )
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &self.instances[0..self.first_invisible])?;
             self.instance_buffer = Some(buffer);
             Ok(())
         }

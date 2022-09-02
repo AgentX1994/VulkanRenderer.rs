@@ -11,6 +11,9 @@ use memoffset::offset_of;
 
 use super::RendererResult;
 use super::buffer::Buffer;
+use super::context::VulkanContext;
+use super::error::RendererError;
+use super::model::InvalidHandle;
 use super::pipeline::GraphicsPipeline;
 use super::shader_module::ShaderModule;
 use super::swapchain::Swapchain;
@@ -281,7 +284,7 @@ impl TextVertexData {
 }
 
 pub struct TextHandler {
-    vertex_data: Vec<TextVertexData>,
+    vertex_data: HashMap<usize, Vec<TextVertexData>>,
     vertex_buffer: Option<Buffer>,
     textures: Vec<TextTexture>,
     texture_ids: HashMap<fontdue::layout::GlyphRasterConfig, u32>,
@@ -305,7 +308,7 @@ impl TextHandler {
         )?;
 
         let mut text_handler = TextHandler {
-            vertex_data: vec![],
+            vertex_data: HashMap::new(),
             vertex_buffer: None,
             textures: vec![],
             texture_ids: HashMap::new(),
@@ -384,7 +387,7 @@ impl TextHandler {
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
         swapchain: &Swapchain,
-    ) -> RendererResult<()> {
+    ) -> RendererResult<usize> {
         let screen_size = window.inner_size();
         let mut need_texture_update = false;
         let mut vertex_data = Vec::with_capacity(6 * letters.len());
@@ -458,11 +461,26 @@ impl TextHandler {
             vertex_data.push(v2);
             vertex_data.push(v4);
         }
-        self.vertex_data.append(&mut vertex_data);
+        let id: usize = rand::random();
+        self.vertex_data.insert(id, vertex_data);
         if need_texture_update {
             self.update_textures(render_pass, swapchain, device)?;
         }
-        Ok(())
+        Ok(id)
+    }
+
+    pub fn remove_text_by_id(
+        &mut self,
+        context: &VulkanContext,
+        allocator: &mut Allocator,
+        id: usize
+    ) -> RendererResult<()> {
+        if self.vertex_data.remove(&id).is_some() {
+            self.update_vertex_buffer(&context.device, allocator)?;
+            Ok(())
+        } else {
+            Err(RendererError::InvalidHandle(InvalidHandle))
+        }
     }
 
     pub fn update_textures(
@@ -553,15 +571,17 @@ impl TextHandler {
         if self.vertex_data.is_empty() {
             return Ok(());
         }
+        // This is probably pretty slow but I am lazy
+        // TODO find a better text handling solution
+        let mut vert_data = vec![];
+        for verts in self.vertex_data.values() {
+            vert_data.extend_from_slice(verts);
+        }
         if let Some(buffer) = &mut self.vertex_buffer {
-            let bytes = (self.vertex_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
-            let data = unsafe {
-                std::slice::from_raw_parts(self.vertex_data.as_ptr() as *const u8, bytes as usize)
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &vert_data)?;
             Ok(())
         } else {
-            let bytes = (self.vertex_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
+            let bytes = (vert_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
             let mut buffer = Buffer::new(
                 device,
                 allocator,
@@ -569,10 +589,7 @@ impl TextHandler {
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 MemoryLocation::CpuToGpu,
             )?;
-            let data = unsafe {
-                std::slice::from_raw_parts(self.vertex_data.as_ptr() as *const u8, bytes as usize)
-            };
-            buffer.fill(allocator, data)?;
+            buffer.fill(allocator, &vert_data)?;
             self.vertex_buffer = Some(buffer);
             Ok(())
         }
@@ -602,7 +619,7 @@ impl TextHandler {
                         device.cmd_bind_vertex_buffers(cmd_buf, 0, &[buf.buffer], &[0]);
                         device.cmd_draw(
                             cmd_buf,
-                            self.vertex_data.len() as u32,
+                            self.vertex_data.values().map(|v| v.len()).sum::<usize>() as u32,
                             1, // instance count
                             0,
                             0,

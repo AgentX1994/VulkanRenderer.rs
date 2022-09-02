@@ -212,8 +212,6 @@ impl Camera {
     ) -> RendererResult<()> {
         let data_array: [[[f32; 4]; 4]; 2] =
             [self.view_matrix.into(), self.projection_matrix.into()];
-        let bytes = std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
-        let data = unsafe { std::slice::from_raw_parts(data_array.as_ptr() as *const u8, bytes) };
-        buffer.fill(allocator, data)
+        buffer.fill(allocator, &data_array)
     }
 }

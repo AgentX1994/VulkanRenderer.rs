@@ -373,11 +373,7 @@ impl Renderer {
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             MemoryLocation::CpuToGpu,
         )?;
-
-        let bytes = std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
-        let data =
-            unsafe { std::slice::from_raw_parts(camera_transforms.as_ptr() as *const u8, bytes) };
-        uniform_buffer.fill(&mut allocator, data)?;
+        uniform_buffer.fill(&mut allocator, &camera_transforms)?;
 
         // Create storage buffer for lights
         let mut light_buffer = Buffer::new(
@@ -387,8 +383,7 @@ impl Renderer {
             vk::BufferUsageFlags::STORAGE_BUFFER,
             MemoryLocation::CpuToGpu,
         )?;
-        let data = unsafe { std::slice::from_raw_parts([0.0f32; 2].as_ptr() as *const u8, 8) };
-        light_buffer.fill(&mut allocator, data)?;
+        light_buffer.fill(&mut allocator, &[0.0f32; 2])?;
 
         // Create descriptor pool
         let pool_sizes = [
@@ -758,10 +753,10 @@ impl Renderer {
         position: (u32, u32),
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
-    ) -> RendererResult<()> {
+    ) -> RendererResult<usize> {
         let letters = self.text.create_letters(styles, color);
-        if let Some(allo) = &mut self.allocator {
-            self.text.create_vertex_data(
+        let id = if let Some(allo) = &mut self.allocator {
+            let id = self.text.create_vertex_data(
                 letters,
                 position,
                 window,
@@ -773,8 +768,19 @@ impl Renderer {
                 &self.swapchain,
             )?;
             self.text.update_vertex_buffer(&self.context.device, allo)?;
+            id
+        } else {
+            panic!("No allocator!");
+        };
+        Ok(id)
+    }
+
+    pub fn remove_text(&mut self, id: usize) -> RendererResult<()> {
+        if let Some(allo) = &mut self.allocator {
+            self.text.remove_text_by_id(&self.context, allo, id)
+        } else {
+            panic!("No allocator!");
         }
-        Ok(())
     }
 
     pub fn screenshot(&mut self) -> RendererResult<()> {
@@ -818,13 +824,12 @@ impl Renderer {
         };
 
         let dest_image_allocation = if let Some(allocator) = &mut self.allocator {
-            allocator
-                .allocate(&AllocationCreateDesc {
-                    name: "dest_image",
-                    requirements: reqs,
-                    location: MemoryLocation::GpuToCpu,
-                    linear: false,
-                })?
+            allocator.allocate(&AllocationCreateDesc {
+                name: "dest_image",
+                requirements: reqs,
+                location: MemoryLocation::GpuToCpu,
+                linear: false,
+            })?
         } else {
             panic!("No allocator!");
         };

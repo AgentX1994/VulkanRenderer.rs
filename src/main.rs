@@ -152,6 +152,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Run event loop
     let mut running = true;
+    let mut now = std::time::SystemTime::now();
+    let mut fps_id = renderer.add_text(
+        &window,
+        (0, 50),
+        &[&fontdue::layout::TextStyle::new("FPS: 000.00", 20.0, 0)],
+        [1.0, 1.0, 1.0],
+    )?;
     event_loop.run(move |event, _, controlflow| match event {
         Event::WindowEvent {
             event: WindowEvent::Resized(size),
@@ -268,6 +275,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if !running {
                 return;
             }
+            let temp = now;
+            now = std::time::SystemTime::now();
+            let diff = 1.0
+                / now
+                    .duration_since(temp)
+                    .unwrap_or_default()
+                    .as_secs_f32();
+            let text = format!("FPS: {:.02}", diff);
+            renderer.remove_text(fps_id).expect("Could not remove old fps text");
+            fps_id = renderer
+                .add_text(
+                    &window,
+                    (0, 100),
+                    &[&fontdue::layout::TextStyle::new(&text, 20.0, 0)],
+                    [1.0, 1.0, 1.0],
+                )
+                .expect("Could not add fps text");
             const MOVE_SPEED: f32 = 0.05f32;
             const TURN_SPEED: f32 = 0.005f32;
             if move_up_pressed {

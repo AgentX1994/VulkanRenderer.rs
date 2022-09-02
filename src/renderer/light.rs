@@ -87,13 +87,7 @@ impl LightManager {
             data_vec.push(pl.luminous_flux.z);
             data_vec.push(0.0); // Padding
         }
-        let data = unsafe {
-            std::slice::from_raw_parts(
-                data_vec.as_ptr() as *const u8,
-                data_vec.len() * std::mem::size_of::<f32>(),
-            )
-        };
-        buffer.fill(allocator, data)?;
+        buffer.fill(allocator, &data_vec)?;
         for ds in descriptor_sets_lights {
             let buffer_infos = [vk::DescriptorBufferInfo {
                 buffer: buffer.buffer,
