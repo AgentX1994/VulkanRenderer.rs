@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::path::Path;
+use std::rc::Rc;
 
 use ash::vk;
 
@@ -17,6 +19,7 @@ pub mod model;
 mod pipeline;
 mod queue;
 mod render_target;
+pub mod scene;
 mod shader_module;
 mod swapchain;
 mod text;
@@ -60,6 +63,7 @@ impl Drop for FrameData {
 }
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct InstanceData {
     pub model_matrix: [[f32; 4]; 4],
     pub inverse_model_matrix: [[f32; 4]; 4],
@@ -110,7 +114,7 @@ pub struct Renderer {
     texture_storage: TextureStorage,
     number_of_textures: u32,
     pub text: TextHandler,
-    pub models: Vec<Model<Vertex, InstanceData>>,
+    pub models: Vec<Rc<RefCell<Model<Vertex, InstanceData>>>>,
 }
 
 impl Renderer {
@@ -587,7 +591,7 @@ impl Renderer {
                 &[],
             );
             for m in &self.models {
-                m.draw(&self.context.device, *cmd_buf);
+                m.borrow().draw(&self.context.device, *cmd_buf);
             }
             self.text.draw(&self.context.device, *cmd_buf, image_index);
             self.context.device.cmd_end_render_pass(*cmd_buf);
@@ -616,7 +620,8 @@ impl Renderer {
             self.update_command_buffer(image_index)?;
             if let Some(alloc) = &mut self.allocator {
                 for m in &mut self.models {
-                    m.update_instance_buffer(&self.context.device, alloc)?;
+                    m.borrow_mut()
+                        .update_instance_buffer(&self.context.device, alloc)?;
                 }
             } else {
                 panic!("No allocator!");
@@ -1104,6 +1109,7 @@ impl Drop for Renderer {
 
             let mut allocator = self.allocator.take().expect("We had no allocator?!");
             for m in &mut self.models {
+                let mut m = m.borrow_mut();
                 if let Some(vb) = &mut m.vertex_buffer {
                     vb.destroy(&mut allocator);
                 }

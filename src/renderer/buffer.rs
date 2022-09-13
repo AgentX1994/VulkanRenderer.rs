@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use ash::vk;
 use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 use gpu_allocator::MemoryLocation;
@@ -11,6 +13,19 @@ pub struct Buffer {
     pub size: u64,
     buffer_usage: vk::BufferUsageFlags,
     location: MemoryLocation,
+}
+
+impl Debug for Buffer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Buffer")
+            .field("device", &self.device.handle())
+            .field("allocation", &self.allocation)
+            .field("buffer", &self.buffer)
+            .field("size", &self.size)
+            .field("buffer_usage", &self.buffer_usage)
+            .field("location", &self.location)
+            .finish()
+    }
 }
 
 impl Buffer {
@@ -27,13 +42,12 @@ impl Buffer {
         // TODO: sharing mode?
         let buffer = unsafe { device.create_buffer(&buffer_create_info, None)? };
         let reqs = unsafe { device.get_buffer_memory_requirements(buffer) };
-        let allocation = allocator
-            .allocate(&AllocationCreateDesc {
-                name: "buffer",
-                requirements: reqs,
-                location,
-                linear: true,
-            })?;
+        let allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "buffer",
+            requirements: reqs,
+            location,
+            linear: true,
+        })?;
 
         unsafe {
             device.bind_buffer_memory(buffer, allocation.memory(), allocation.offset())?;
@@ -81,15 +95,19 @@ impl Buffer {
         }
         if let Some(allocation) = &self.allocation {
             let data_ptr = allocation.mapped_ptr().unwrap().as_ptr() as *mut u8;
-            unsafe { data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, self.size as usize) };
-        } else { 
+            unsafe {
+                data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, self.size as usize)
+            };
+        } else {
             panic!("Buffer had no allocation!");
         }
         Ok(())
     }
 
     pub fn destroy(&mut self, allocator: &mut Allocator) {
-        allocator.free(self.allocation.take().expect("Buffer had no allocation!")).unwrap();
+        allocator
+            .free(self.allocation.take().expect("Buffer had no allocation!"))
+            .unwrap();
         unsafe {
             self.device.destroy_buffer(self.buffer, None);
         }

@@ -1,5 +1,7 @@
+use std::cell::RefCell;
 #[cfg(not(target_os = "windows"))]
 use std::ffi::c_void;
+use std::rc::Rc;
 
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
@@ -15,6 +17,7 @@ use nalgebra as na;
 use nalgebra_glm as glm;
 
 use vulkan_rust::renderer::model::Model;
+use vulkan_rust::renderer::scene::{SceneObject, SceneTree};
 use vulkan_rust::renderer::vertex::Vertex;
 use vulkan_rust::renderer::InstanceData;
 use vulkan_rust::renderer::{error::RendererError, Renderer};
@@ -69,25 +72,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         is_wayland,
     )?;
 
-    let mut sphere = Model::<Vertex, InstanceData>::sphere(3);
+    let sphere = Rc::new(RefCell::new(Model::<Vertex, InstanceData>::sphere(3)));
 
+    let scene_tree = SceneTree::default();
+    let root = scene_tree.get_root();
     for i in 0..10 {
         for j in 0..10 {
-            sphere.insert_visibly(InstanceData::new(
-                glm::Mat4::new_translation(&glm::Vec3::new(i as f32 - 5., j as f32 + 5., 10.0))
-                    * glm::Mat4::new_scaling(0.5),
-                glm::vec3(0.0, 0.0, 0.8),
-                i as f32 * 0.1,
-                j as f32 * 0.1,
-                ((i + j) % 3) as u32,
-            ));
+            let translation = glm::Vec3::new(i as f32 - 5., j as f32 + 5., 10.0);
+            let scale = 0.5f32;
+            let metallic = i as f32 * 0.1;
+            let roughness = j as f32 * 0.1;
+            let texture_id = ((i + j) % 3) as u32;
+
+            let new_object = SceneObject::new_empty();
+            SceneObject::add_child(&root, &new_object);
+            {
+                let mut obj_ref = new_object.borrow_mut();
+                obj_ref.position = translation;
+                obj_ref.scaling = glm::Vec3::new(scale, scale, scale);
+                obj_ref.metallic = metallic;
+                obj_ref.roughness = roughness;
+                obj_ref.texture_id = texture_id;
+                obj_ref.set_model(&sphere)?;
+                obj_ref.update_transform(true)?;
+            }
         }
     }
     if let Some(allo) = &mut renderer.allocator {
         // TODO how to structure this properly?
-        sphere.update_vertex_buffer(&renderer.context.device, allo)?;
-        sphere.update_index_buffer(&renderer.context.device, allo)?;
-        sphere.update_instance_buffer(&renderer.context.device, allo)?;
+        let mut s = sphere.borrow_mut();
+        s.update_vertex_buffer(&renderer.context.device, allo)?;
+        s.update_index_buffer(&renderer.context.device, allo)?;
+        s.update_instance_buffer(&renderer.context.device, allo)?;
     }
     renderer.models = vec![sphere];
 
@@ -123,7 +139,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut turn_right_pressed = false;
     let mut turn_left_pressed = false;
 
-    let _tex1_index = renderer.new_texture_from_file("texture.png")?;
+    let _tex1_index = renderer.new_texture_from_file("texture.jpg")?;
     let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
     let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
     renderer.update_textures()?;
@@ -156,7 +172,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fps_id = renderer.add_text(
         &window,
         (0, 50),
-        &[&fontdue::layout::TextStyle::new("FPS: 000.00", 20.0, 0)],
+        &[&fontdue::layout::TextStyle::new("FPS: 0000.00", 20.0, 0)],
         [1.0, 1.0, 1.0],
     )?;
     event_loop.run(move |event, _, controlflow| match event {
@@ -277,13 +293,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let temp = now;
             now = std::time::SystemTime::now();
-            let diff = 1.0
-                / now
-                    .duration_since(temp)
-                    .unwrap_or_default()
-                    .as_secs_f32();
+            let diff = 1.0 / now.duration_since(temp).unwrap_or_default().as_secs_f32();
             let text = format!("FPS: {:.02}", diff);
-            renderer.remove_text(fps_id).expect("Could not remove old fps text");
+            renderer
+                .remove_text(fps_id)
+                .expect("Could not remove old fps text");
             fps_id = renderer
                 .add_text(
                     &window,

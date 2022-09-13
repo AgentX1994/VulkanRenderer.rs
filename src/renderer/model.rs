@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::Debug;
 
 use ash::vk;
 use nalgebra_glm::{Vec2, Vec3};
@@ -35,6 +36,27 @@ pub struct Model<V, I> {
     pub vertex_buffer: Option<Buffer>,
     pub index_buffer: Option<Buffer>,
     pub instance_buffer: Option<Buffer>,
+}
+
+impl<V, I> Debug for Model<V, I>
+where
+    V: Debug,
+    I: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Model")
+            .field("vertex_data", &self.vertex_data)
+            .field("index_data", &self.index_data)
+            .field("handle_to_index", &self.handle_to_index)
+            .field("handles", &self.handles)
+            .field("instances", &self.instances)
+            .field("first_invisible", &self.first_invisible)
+            .field("next_handle", &self.next_handle)
+            .field("vertex_buffer", &self.vertex_buffer)
+            .field("index_buffer", &self.index_buffer)
+            .field("instance_buffer", &self.instance_buffer)
+            .finish()
+    }
 }
 
 impl<V, I> Model<V, I> {
@@ -339,7 +361,13 @@ impl<V, I> Model<V, I> {
         new_handle
     }
 
-    fn remove(&mut self, handle: usize) -> RendererResult<I> {
+    pub fn update(&mut self, handle: usize, element: I) -> RendererResult<()> {
+        let index = self.handle_to_index.get(&handle).ok_or(InvalidHandle)?;
+        self.instances[*index] = element;
+        Ok(())
+    }
+
+    pub fn remove(&mut self, handle: usize) -> RendererResult<I> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             if index < self.first_invisible {
                 self.swap_by_index(index, self.first_invisible - 1);
@@ -406,6 +434,9 @@ impl<V, I> Model<V, I> {
         device: &ash::Device,
         allocator: &mut Allocator,
     ) -> RendererResult<()> {
+        if self.first_invisible == 0 {
+            return Ok(());
+        }
         if let Some(buffer) = &mut self.instance_buffer {
             buffer.fill(allocator, &self.instances[0..self.first_invisible])?;
             Ok(())
