@@ -1,10 +1,15 @@
+use std::sync::{Arc, Mutex};
+
 use ash::{vk, Device};
 use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, Allocator},
     MemoryLocation,
 };
 
-use super::{buffer::Buffer, RendererResult};
+use super::{
+    buffer::BufferManager,
+    RendererResult,
+};
 
 pub struct Texture {
     image: image::RgbaImage,
@@ -19,6 +24,7 @@ impl Texture {
         path: P,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
     ) -> RendererResult<Self> {
@@ -45,13 +51,12 @@ impl Texture {
 
         // Allocate memory for image
         let reqs = unsafe { device.get_image_memory_requirements(vk_image) };
-        let allocation = allocator
-            .allocate(&AllocationCreateDesc {
-                name: "texture",
-                requirements: reqs,
-                location: MemoryLocation::GpuOnly,
-                linear: false,
-            })?;
+        let allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "texture",
+            requirements: reqs,
+            location: MemoryLocation::GpuOnly,
+            linear: false,
+        })?;
         unsafe {
             device.bind_image_memory(vk_image, allocation.memory(), allocation.offset())?;
         };
@@ -77,7 +82,8 @@ impl Texture {
 
         // Create buffer to copy data into image
         let data = image.clone().into_raw();
-        let mut buffer = Buffer::new(
+        let mut buffer = BufferManager::new_buffer(
+            buffer_manager,
             device,
             allocator,
             data.len() as u64,
@@ -145,9 +151,10 @@ impl Texture {
             image_subresource,
         };
         unsafe {
+            let int_buf = buffer.get_buffer();
             device.cmd_copy_buffer_to_image(
                 copy_cmd_buf,
-                buffer.buffer,
+                int_buf.buffer,
                 vk_image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[region],
@@ -197,7 +204,7 @@ impl Texture {
 
         // Cleanup
         unsafe { device.destroy_fence(fence, None) };
-        buffer.destroy(allocator);
+        buffer.queue_free();
         unsafe { device.free_command_buffers(command_pool, &[copy_cmd_buf]) };
 
         // Done
@@ -224,7 +231,7 @@ impl Texture {
 
 #[derive(Default)]
 pub struct TextureStorage {
-    textures: Vec<Texture>
+    textures: Vec<Texture>,
 }
 
 impl TextureStorage {
@@ -233,10 +240,11 @@ impl TextureStorage {
         path: P,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
     ) -> RendererResult<usize> {
-        let texture = Texture::from_file(path, device, allocator, command_pool, queue)?;
+        let texture = Texture::from_file(path, device, allocator, buffer_manager, command_pool, queue)?;
         let new_id = self.textures.len();
         self.textures.push(texture);
         Ok(new_id)
@@ -250,7 +258,6 @@ impl TextureStorage {
         self.textures.get(index)
     }
 
-
     pub fn get_texture_mut(&mut self, index: usize) -> Option<&mut Texture> {
         self.textures.get_mut(index)
     }
@@ -261,7 +268,7 @@ impl TextureStorage {
             .map(|tex| vk::DescriptorImageInfo {
                 image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 image_view: tex.image_view,
-                sampler: tex.sampler
+                sampler: tex.sampler,
             })
             .collect()
     }

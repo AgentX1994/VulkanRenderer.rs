@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use nalgebra_glm::{Vec2, Vec3};
@@ -9,21 +10,10 @@ use gpu_allocator::MemoryLocation;
 
 use crate::renderer::Buffer;
 
+use super::buffer::BufferManager;
+use super::error::InvalidHandle;
 use super::vertex::Vertex;
 use super::{InstanceData, RendererResult};
-
-#[derive(Debug, Clone, Copy)]
-pub struct InvalidHandle;
-impl std::fmt::Display for InvalidHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Invalid Handle")
-    }
-}
-impl std::error::Error for InvalidHandle {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
-    }
-}
 
 pub struct Model<V, I> {
     vertex_data: Vec<V>,
@@ -290,8 +280,8 @@ impl<V, I> Model<V, I> {
         ) {
             self.handles.swap(index1, index2);
             self.instances.swap(index1, index2);
-            self.handle_to_index.insert(index1, handle2);
-            self.handle_to_index.insert(index2, handle1);
+            self.handle_to_index.insert( handle2, index1);
+            self.handle_to_index.insert( handle1, index2);
             Ok(())
         } else {
             Err(InvalidHandle)
@@ -306,8 +296,8 @@ impl<V, I> Model<V, I> {
         let handle2 = self.handles[index2];
         self.handles.swap(index1, index2);
         self.instances.swap(index1, index2);
-        self.handle_to_index.insert(index1, handle2);
-        self.handle_to_index.insert(index2, handle1);
+        self.handle_to_index.insert( handle2, index1);
+        self.handle_to_index.insert( handle1, index2);
     }
 
     fn is_visible(&self, handle: usize) -> Result<bool, InvalidHandle> {
@@ -387,13 +377,15 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.vertex_buffer {
             buffer.fill(allocator, &self.vertex_data)?;
             Ok(())
         } else {
             let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
-            let mut buffer = Buffer::new(
+            let mut buffer = BufferManager::new_buffer(
+                buffer_manager,
                 device,
                 allocator,
                 bytes as u64,
@@ -410,13 +402,15 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.index_buffer {
             buffer.fill(allocator, &self.index_data)?;
             Ok(())
         } else {
             let bytes = self.index_data.len() * std::mem::size_of::<u32>();
-            let mut buffer = Buffer::new(
+            let mut buffer = BufferManager::new_buffer(
+                buffer_manager,
                 device,
                 allocator,
                 bytes as u64,
@@ -433,6 +427,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>
     ) -> RendererResult<()> {
         if self.first_invisible == 0 {
             return Ok(());
@@ -442,7 +437,8 @@ impl<V, I> Model<V, I> {
             Ok(())
         } else {
             let bytes = self.first_invisible * std::mem::size_of::<I>();
-            let mut buffer = Buffer::new(
+            let mut buffer = BufferManager::new_buffer(
+                buffer_manager,
                 device,
                 allocator,
                 bytes as u64,
@@ -461,22 +457,25 @@ impl<V, I> Model<V, I> {
                 if let Some(inst_buf) = &self.instance_buffer {
                     if self.first_invisible > 0 {
                         unsafe {
+                            let vert_buf_int = vert_buf.get_buffer();
+                            let ind_buf_int = ind_buf.get_buffer();
+                            let inst_buf_int = inst_buf.get_buffer();
                             device.cmd_bind_vertex_buffers(
                                 command_buffer,
                                 0,
-                                &[vert_buf.buffer],
+                                &[vert_buf_int.buffer],
                                 &[0],
                             );
                             device.cmd_bind_index_buffer(
                                 command_buffer,
-                                ind_buf.buffer,
+                                ind_buf_int.buffer,
                                 0,
                                 vk::IndexType::UINT32,
                             );
                             device.cmd_bind_vertex_buffers(
                                 command_buffer,
                                 1,
-                                &[inst_buf.buffer],
+                                &[inst_buf_int.buffer],
                                 &[0],
                             );
                             device.cmd_draw_indexed(

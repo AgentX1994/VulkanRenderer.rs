@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::ffi::c_void;
 use std::path::Path;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
@@ -34,6 +35,7 @@ use shader_module::ShaderModule;
 use swapchain::Swapchain;
 use vertex::Vertex;
 
+use self::buffer::BufferManager;
 use self::context::VulkanContext;
 use self::light::LightManager;
 use self::text::TextHandler;
@@ -96,6 +98,7 @@ pub struct Renderer {
     dropped: bool,
     pub context: VulkanContext,
     pub allocator: Option<Allocator>,
+    pub buffer_manager: Arc<Mutex<BufferManager>>,
     swapchain: Swapchain,
     render_pass: vk::RenderPass,
     shader_module: ShaderModule,
@@ -243,8 +246,9 @@ impl Renderer {
             unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_texture)? };
 
         for ds in descriptor_sets_camera.iter() {
+            let int_buf = uniform_buffer.get_buffer();
             let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: uniform_buffer.buffer,
+                buffer: int_buf.buffer,
                 offset: 0,
                 range: std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
             }];
@@ -261,8 +265,9 @@ impl Renderer {
         }
 
         for ds in descriptor_sets_lights.iter() {
+            let int_buf = light_buffer.get_buffer();
             let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: light_buffer.buffer,
+                buffer: int_buf.buffer,
                 offset: 0,
                 range: 8,
             }];
@@ -367,10 +372,13 @@ impl Renderer {
         let frame_data = Self::create_frame_data(&context.device, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.get_actual_image_count() as usize];
 
+        // Create buffer manager
+        let buffer_manager = BufferManager::new();
         // Create uniform buffer
         let camera_transforms: [[[f32; 4]; 4]; 2] =
             [glm::Mat4::identity().into(), glm::Mat4::identity().into()];
-        let mut uniform_buffer = Buffer::new(
+        let mut uniform_buffer = BufferManager::new_buffer(
+            buffer_manager.clone(),
             &context.device,
             &mut allocator,
             std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
@@ -380,7 +388,8 @@ impl Renderer {
         uniform_buffer.fill(&mut allocator, &camera_transforms)?;
 
         // Create storage buffer for lights
-        let mut light_buffer = Buffer::new(
+        let mut light_buffer = BufferManager::new_buffer(
+            buffer_manager.clone(),
             &context.device,
             &mut allocator,
             8,
@@ -433,6 +442,7 @@ impl Renderer {
             dropped: false,
             context,
             allocator: Some(allocator),
+            buffer_manager,
             swapchain,
             graphics_command_pool,
             command_buffers,
@@ -620,8 +630,11 @@ impl Renderer {
             self.update_command_buffer(image_index)?;
             if let Some(alloc) = &mut self.allocator {
                 for m in &mut self.models {
-                    m.borrow_mut()
-                        .update_instance_buffer(&self.context.device, alloc)?;
+                    m.borrow_mut().update_instance_buffer(
+                        &self.context.device,
+                        alloc,
+                        self.buffer_manager.clone(),
+                    )?;
                 }
             } else {
                 panic!("No allocator!");
@@ -658,6 +671,12 @@ impl Renderer {
 
         self.present(image_index)?;
         self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
+        if let Some(allo) = &mut self.allocator {
+            self.buffer_manager
+                .lock()
+                .unwrap()
+                .free_queued(allo);
+        }
         Ok(())
     }
 
@@ -688,6 +707,7 @@ impl Renderer {
                 path,
                 &self.context.device,
                 allo,
+                self.buffer_manager.clone(),
                 self.graphics_command_pool,
                 self.context.graphics_queue.queue,
             )?)
@@ -767,12 +787,17 @@ impl Renderer {
                 window,
                 &self.context.device,
                 allo,
+                self.buffer_manager.clone(),
                 &self.render_pass,
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
                 &self.swapchain,
             )?;
-            self.text.update_vertex_buffer(&self.context.device, allo)?;
+            self.text.update_vertex_buffer(
+                &self.context.device,
+                allo,
+                self.buffer_manager.clone(),
+            )?;
             id
         } else {
             panic!("No allocator!");
@@ -782,7 +807,8 @@ impl Renderer {
 
     pub fn remove_text(&mut self, id: usize) -> RendererResult<()> {
         if let Some(allo) = &mut self.allocator {
-            self.text.remove_text_by_id(&self.context, allo, id)
+            self.text
+                .remove_text_by_id(&self.context, allo, self.buffer_manager.clone(), id)
         } else {
             panic!("No allocator!");
         }
@@ -1111,17 +1137,17 @@ impl Drop for Renderer {
             for m in &mut self.models {
                 let mut m = m.borrow_mut();
                 if let Some(vb) = &mut m.vertex_buffer {
-                    vb.destroy(&mut allocator);
+                    vb.queue_free();
                 }
                 if let Some(ib) = &mut m.index_buffer {
-                    ib.destroy(&mut allocator);
+                    ib.queue_free();
                 }
                 if let Some(ib) = &mut m.instance_buffer {
-                    ib.destroy(&mut allocator);
+                    ib.queue_free();
                 }
             }
-            self.uniform_buffer.destroy(&mut allocator);
-            self.light_buffer.destroy(&mut allocator);
+            self.uniform_buffer.queue_free();
+            self.light_buffer.queue_free();
             self.texture_storage
                 .clean_up(&self.context.device, &mut allocator);
 
@@ -1137,6 +1163,10 @@ impl Drop for Renderer {
                 .destroy_render_pass(self.render_pass, None);
             self.swapchain.destroy(&self.context, &mut allocator);
             self.shader_module.destroy();
+            self.buffer_manager
+                .lock()
+                .unwrap()
+                .free_queued(&mut allocator);
             drop(allocator); // Ensure all memory is freed
         }
         self.dropped = true;

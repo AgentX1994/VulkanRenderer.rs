@@ -89,10 +89,11 @@ impl LightManager {
         }
         buffer.fill(allocator, &data_vec)?;
         for ds in descriptor_sets_lights {
+            let int_buf = buffer.get_buffer();
             let buffer_infos = [vk::DescriptorBufferInfo {
-                buffer: buffer.buffer,
+                buffer: int_buf.buffer,
                 offset: 0,
-                range: buffer.size,
+                range: int_buf.size,
             }];
             let desc_sets_write = [vk::WriteDescriptorSet::builder()
                 .dst_set(*ds)

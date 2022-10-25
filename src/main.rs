@@ -5,17 +5,17 @@ use std::rc::Rc;
 
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
-use vulkan_rust::renderer::camera::Camera;
-use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
+#[cfg(not(target_os = "windows"))]
+use winit::platform::unix::WindowExtUnix;
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 
-#[cfg(not(target_os = "windows"))]
-use winit::platform::unix::WindowExtUnix;
 
 use nalgebra as na;
 use nalgebra_glm as glm;
 
+use vulkan_rust::renderer::camera::Camera;
+use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
 use vulkan_rust::renderer::model::Model;
 use vulkan_rust::renderer::scene::{SceneObject, SceneTree};
 use vulkan_rust::renderer::vertex::Vertex;
@@ -101,9 +101,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(allo) = &mut renderer.allocator {
         // TODO how to structure this properly?
         let mut s = sphere.borrow_mut();
-        s.update_vertex_buffer(&renderer.context.device, allo)?;
-        s.update_index_buffer(&renderer.context.device, allo)?;
-        s.update_instance_buffer(&renderer.context.device, allo)?;
+        s.update_vertex_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
+        s.update_index_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
+        s.update_instance_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
     }
     renderer.models = vec![sphere];
 
@@ -139,7 +151,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut turn_right_pressed = false;
     let mut turn_left_pressed = false;
 
-    let _tex1_index = renderer.new_texture_from_file("texture.jpg")?;
+    let _tex1_index = renderer.new_texture_from_file("texture.png")?;
     let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
     let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
     renderer.update_textures()?;

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use ash::vk;
 use ash::Device;
@@ -9,14 +11,15 @@ use gpu_allocator::vulkan::{Allocation, Allocator};
 use gpu_allocator::MemoryLocation;
 use memoffset::offset_of;
 
-use super::RendererResult;
 use super::buffer::Buffer;
+use super::buffer::BufferManager;
 use super::context::VulkanContext;
+use super::error::InvalidHandle;
 use super::error::RendererError;
-use super::model::InvalidHandle;
 use super::pipeline::GraphicsPipeline;
 use super::shader_module::ShaderModule;
 use super::swapchain::Swapchain;
+use super::RendererResult;
 
 pub struct TextTexture {
     image: vk::Image,
@@ -32,6 +35,7 @@ impl TextTexture {
         height: u32,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RendererResult<Self> {
@@ -52,13 +56,12 @@ impl TextTexture {
 
         //  allocate memory for image
         let reqs = unsafe { device.get_image_memory_requirements(image) };
-        let allocation = allocator
-            .allocate(&AllocationCreateDesc {
-                name: "text texture",
-                requirements: reqs,
-                location: MemoryLocation::GpuOnly,
-                linear: false,
-            })?;
+        let allocation = allocator.allocate(&AllocationCreateDesc {
+            name: "text texture",
+            requirements: reqs,
+            location: MemoryLocation::GpuOnly,
+            linear: false,
+        })?;
 
         // bind memory to image
         unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset()) }?;
@@ -83,7 +86,8 @@ impl TextTexture {
         let sampler = unsafe { device.create_sampler(&sampler_info, None) }?;
 
         // Create buffer and fill with data
-        let mut buffer = Buffer::new(
+        let mut buffer = BufferManager::new_buffer(
+            buffer_manager,
             device,
             allocator,
             data.len() as u64,
@@ -150,9 +154,10 @@ impl TextTexture {
             image_subresource,
         };
         unsafe {
+            let int_buf = buffer.get_buffer();
             device.cmd_copy_buffer_to_image(
                 copy_buf,
-                buffer.buffer,
+                int_buf.buffer,
                 image,
                 vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                 &[region],
@@ -202,7 +207,7 @@ impl TextTexture {
 
         // Cleanup
         unsafe { device.destroy_fence(fence, None) };
-        buffer.destroy(allocator);
+        buffer.queue_free();
         unsafe { device.free_command_buffers(*command_pool, &[copy_buf]) };
 
         // Done
@@ -324,10 +329,7 @@ impl TextHandler {
         Ok(text_handler)
     }
 
-    pub fn load_font<P: AsRef<Path>>(
-        &mut self,
-        path: P,
-    ) -> RendererResult<usize> {
+    pub fn load_font<P: AsRef<Path>>(&mut self, path: P) -> RendererResult<usize> {
         let font_data = std::fs::read(path)?;
         let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
         let index = self.fonts.len();
@@ -366,11 +368,20 @@ impl TextHandler {
         height: u32,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RendererResult<usize> {
-        let new_texture =
-            TextTexture::from_u8s(data, width, height, device, allocator, command_pool, queue)?;
+        let new_texture = TextTexture::from_u8s(
+            data,
+            width,
+            height,
+            device,
+            allocator,
+            buffer_manager,
+            command_pool,
+            queue,
+        )?;
         let new_id = self.textures.len();
         self.textures.push(new_texture);
         Ok(new_id)
@@ -383,6 +394,7 @@ impl TextHandler {
         window: &winit::window::Window,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         render_pass: &vk::RenderPass,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
@@ -402,16 +414,16 @@ impl TextHandler {
                     continue;
                 }
                 need_texture_update = true;
-                let id = self
-                    .new_texture_from_u8s(
-                        &bitmap,
-                        metrics.width as u32,
-                        metrics.height as u32,
-                        device,
-                        allocator,
-                        command_pool,
-                        queue,
-                    )? as u32;
+                let id = self.new_texture_from_u8s(
+                    &bitmap,
+                    metrics.width as u32,
+                    metrics.height as u32,
+                    device,
+                    allocator,
+                    buffer_manager.clone(),
+                    command_pool,
+                    queue,
+                )? as u32;
                 self.texture_ids.insert(l.position_and_shape.key, id);
                 id
             };
@@ -473,10 +485,11 @@ impl TextHandler {
         &mut self,
         context: &VulkanContext,
         allocator: &mut Allocator,
-        id: usize
+        buffer_manager: Arc<Mutex<BufferManager>>,
+        id: usize,
     ) -> RendererResult<()> {
         if self.vertex_data.remove(&id).is_some() {
-            self.update_vertex_buffer(&context.device, allocator)?;
+            self.update_vertex_buffer(&context.device, allocator, buffer_manager)?;
             Ok(())
         } else {
             Err(RendererError::InvalidHandle(InvalidHandle))
@@ -567,6 +580,7 @@ impl TextHandler {
         &mut self,
         device: &Device,
         allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
     ) -> RendererResult<()> {
         if self.vertex_data.is_empty() {
             return Ok(());
@@ -582,7 +596,8 @@ impl TextHandler {
             Ok(())
         } else {
             let bytes = (vert_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
-            let mut buffer = Buffer::new(
+            let mut buffer = BufferManager::new_buffer(
+                buffer_manager,
                 device,
                 allocator,
                 bytes,
@@ -616,7 +631,8 @@ impl TextHandler {
                 }
                 if let Some(buf) = &self.vertex_buffer {
                     unsafe {
-                        device.cmd_bind_vertex_buffers(cmd_buf, 0, &[buf.buffer], &[0]);
+                        let int_buf = buf.get_buffer();
+                        device.cmd_bind_vertex_buffers(cmd_buf, 0, &[int_buf.buffer], &[0]);
                         device.cmd_draw(
                             cmd_buf,
                             self.vertex_data.values().map(|v| v.len()).sum::<usize>() as u32,
@@ -645,7 +661,7 @@ impl TextHandler {
         }
 
         if let Some(mut b) = self.vertex_buffer.take() {
-            b.destroy(allocator);
+            b.queue_free();
         }
         for t in &mut self.textures {
             t.destroy(device, allocator);

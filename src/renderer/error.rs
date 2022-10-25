@@ -5,7 +5,18 @@ use std::io;
 use ash::vk;
 use gpu_allocator::AllocationError;
 
-use super::model::InvalidHandle;
+#[derive(Debug, Clone, Copy)]
+pub struct InvalidHandle;
+impl std::fmt::Display for InvalidHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Invalid Handle")
+    }
+}
+impl std::error::Error for InvalidHandle {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
 
 #[derive(Debug)]
 pub enum RendererError {
