@@ -101,7 +101,7 @@ impl InternalBuffer {
         if let Some(allocation) = &self.allocation {
             let data_ptr = allocation.mapped_ptr().unwrap().as_ptr() as *mut u8;
             unsafe {
-                data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, self.size as usize)
+                data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, data_len as usize)
             };
         } else {
             panic!("Buffer had no allocation!");
