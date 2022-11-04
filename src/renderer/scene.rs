@@ -2,12 +2,12 @@ use std::{cell::RefCell, rc::Rc};
 
 use nalgebra_glm as glm;
 
-use super::{model::Model, vertex::Vertex, InstanceData, RendererResult};
+use super::{model::{Model, ModelHandle}, vertex::Vertex, InstanceData, RendererResult};
 
 #[derive(Debug)]
 pub struct SceneObject {
     model: Option<Rc<RefCell<Model<Vertex, InstanceData>>>>,
-    pub instance_id: Option<usize>,
+    pub instance_id: Option<ModelHandle>,
     pub position: glm::Vec3,
     pub rotation: glm::Quat,
     pub scaling: glm::Vec3,

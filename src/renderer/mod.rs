@@ -26,6 +26,7 @@ mod swapchain;
 mod text;
 mod texture;
 pub mod vertex;
+pub mod utils;
 
 use buffer::Buffer;
 use camera::Camera;
@@ -1137,17 +1138,17 @@ impl Drop for Renderer {
             for m in &mut self.models {
                 let mut m = m.borrow_mut();
                 if let Some(vb) = &mut m.vertex_buffer {
-                    vb.queue_free();
+                    vb.queue_free().expect("Invalid Handle?!");
                 }
                 if let Some(ib) = &mut m.index_buffer {
-                    ib.queue_free();
+                    ib.queue_free().expect("Invalid Handle?!");
                 }
                 if let Some(ib) = &mut m.instance_buffer {
-                    ib.queue_free();
+                    ib.queue_free().expect("Invalid Handle?!");
                 }
             }
-            self.uniform_buffer.queue_free();
-            self.light_buffer.queue_free();
+            self.uniform_buffer.queue_free().expect("Invalid Handle?!");
+            self.light_buffer.queue_free().expect("Invalid Handle?!");
             self.texture_storage
                 .clean_up(&self.context.device, &mut allocator);
 

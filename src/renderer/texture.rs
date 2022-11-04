@@ -204,7 +204,7 @@ impl Texture {
 
         // Cleanup
         unsafe { device.destroy_fence(fence, None) };
-        buffer.queue_free();
+        buffer.queue_free()?;
         unsafe { device.free_command_buffers(command_pool, &[copy_cmd_buf]) };
 
         // Done

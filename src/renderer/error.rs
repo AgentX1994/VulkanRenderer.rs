@@ -7,12 +7,12 @@ use gpu_allocator::AllocationError;
 
 #[derive(Debug, Clone, Copy)]
 pub struct InvalidHandle;
-impl std::fmt::Display for InvalidHandle {
+impl fmt::Display for InvalidHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Invalid Handle")
     }
 }
-impl std::error::Error for InvalidHandle {
+impl error::Error for InvalidHandle {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         None
     }

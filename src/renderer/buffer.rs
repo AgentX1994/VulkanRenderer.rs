@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
@@ -8,8 +7,10 @@ use gpu_allocator::MemoryLocation;
 
 use super::error::InvalidHandle;
 use super::RendererResult;
+use super::utils::{HandleArray, Handle};
 
-pub type BufferHandle = u32;
+#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct BufferHandle(Handle);
 
 struct InternalBuffer {
     device: ash::Device,
@@ -121,21 +122,15 @@ impl InternalBuffer {
 
 #[derive(Debug)]
 pub struct BufferManager {
-    buffers: Vec<InternalBuffer>,
+    handle_array: HandleArray<InternalBuffer>,
     to_free: Vec<InternalBuffer>,
-    handles: Vec<BufferHandle>,
-    handle_to_index: HashMap<BufferHandle, usize>,
-    next_handle: BufferHandle,
 }
 
 impl BufferManager {
     pub fn new() -> Arc<Mutex<BufferManager>> {
         Arc::new(Mutex::new(BufferManager {
-            buffers: vec![],
+            handle_array: HandleArray::new(),
             to_free: vec![],
-            handles: vec![],
-            handle_to_index: HashMap::new(),
-            next_handle: 0 as _,
         }))
     }
 
@@ -148,13 +143,7 @@ impl BufferManager {
         location: MemoryLocation,
     ) -> RendererResult<BufferHandle> {
         let internal_buffer = InternalBuffer::new(device, allocator, size, buffer_usage, location)?;
-        let handle = self.next_handle;
-        self.next_handle += 1;
-        let index = self.buffers.len();
-        self.buffers.push(internal_buffer);
-        self.handles.push(handle);
-        self.handle_to_index.insert(handle, index);
-        Ok(handle)
+        Ok(BufferHandle(self.handle_array.insert(internal_buffer)))
     }
 
     pub fn new_buffer(
@@ -180,25 +169,8 @@ impl BufferManager {
         Ok(buffer)
     }
 
-    pub fn swap_by_index(&mut self, index1: usize, index2: usize) {
-        if index1 == index2 {
-            return;
-        }
-        let handle1 = self.handles[index1];
-        let handle2 = self.handles[index2];
-        self.handles.swap(index1, index2);
-        self.buffers.swap(index1, index2);
-        self.handle_to_index.insert(handle2, index1);
-        self.handle_to_index.insert(handle1, index2);
-    }
-
     pub fn get_buffer(&self, handle: BufferHandle) -> Option<BufferDetails> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
-            let int_buf = self.buffers.get(index).unwrap();
-            Some(int_buf.into())
-        } else {
-            None
-        }
+        self.handle_array.get(handle.0).map(|int_buf| int_buf.into())
     }
 
     pub fn fill_buffer_by_handle<T>(
@@ -207,22 +179,15 @@ impl BufferManager {
         allocator: &mut Allocator,
         data: &[T],
     ) -> RendererResult<()> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
-            self.buffers.get_mut(index).unwrap().fill(allocator, data)
-        } else {
-            Err(InvalidHandle.into())
-        }
+        self.handle_array.get_mut(handle.0)
+            .ok_or(InvalidHandle.into())
+            .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
-    pub fn queue_free(&mut self, handle: BufferHandle) {
-        if let Some(index) = self.handle_to_index.remove(&handle) {
-            self.swap_by_index(index, self.buffers.len() - 1);
-            let int_buf = self.buffers.pop().unwrap();
-            self.handles.pop().unwrap();
-            self.to_free.push(int_buf);
-        } else {
-            panic!("Tried to free invalid buffer handle");
-        }
+    pub fn queue_free(&mut self, handle: BufferHandle) -> RendererResult<()> {
+        let int_buf = self.handle_array.remove(handle.0)?;
+        self.to_free.push(int_buf);
+        Ok(())
     }
 
     pub fn free_queued(&mut self, allocator: &mut Allocator) {
@@ -284,7 +249,7 @@ impl Buffer {
             .unwrap()
     }
 
-    pub fn queue_free(&mut self) {
+    pub fn queue_free(&mut self) -> RendererResult<()> {
         if !self.active {
             panic!("Tried to free inactive buffer!");
         }

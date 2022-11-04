@@ -12,17 +12,18 @@ use crate::renderer::Buffer;
 
 use super::buffer::BufferManager;
 use super::error::InvalidHandle;
+use super::utils::{Handle, HandleArray};
 use super::vertex::Vertex;
 use super::{InstanceData, RendererResult};
+
+#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
+pub struct ModelHandle(Handle);
 
 pub struct Model<V, I> {
     vertex_data: Vec<V>,
     index_data: Vec<u32>,
-    handle_to_index: HashMap<usize, usize>,
-    handles: Vec<usize>,
-    instances: Vec<I>,
+    handle_array: HandleArray<I>,
     first_invisible: usize,
-    next_handle: usize,
     pub vertex_buffer: Option<Buffer>,
     pub index_buffer: Option<Buffer>,
     pub instance_buffer: Option<Buffer>,
@@ -37,11 +38,8 @@ where
         f.debug_struct("Model")
             .field("vertex_data", &self.vertex_data)
             .field("index_data", &self.index_data)
-            .field("handle_to_index", &self.handle_to_index)
-            .field("handles", &self.handles)
-            .field("instances", &self.instances)
+            .field("handle_array", &self.handle_array)
             .field("first_invisible", &self.first_invisible)
-            .field("next_handle", &self.next_handle)
             .field("vertex_buffer", &self.vertex_buffer)
             .field("index_buffer", &self.index_buffer)
             .field("instance_buffer", &self.instance_buffer)
@@ -102,11 +100,8 @@ impl<V, I> Model<V, I> {
                 0, 2, 1, 1, 2, 3, // left
                 4, 5, 6, 5, 7, 6, // right
             ],
-            handle_to_index: Default::default(),
-            handles: Vec::new(),
-            instances: Vec::new(),
+            handle_array: Default::default(),
             first_invisible: 0,
-            next_handle: 0,
             vertex_buffer: None,
             index_buffer: None,
             instance_buffer: None,
@@ -221,11 +216,8 @@ impl<V, I> Model<V, I> {
                 6, 7, 9, //
                 6, 11, 7, //
             ],
-            handle_to_index: Default::default(),
-            handles: Default::default(),
-            instances: Default::default(),
+            handle_array: Default::default(),
             first_invisible: 0,
-            next_handle: 0,
             vertex_buffer: None,
             index_buffer: None,
             instance_buffer: None,
@@ -254,66 +246,28 @@ impl<V, I> Model<V, I> {
         model
     }
 
-    pub fn get(&self, handle: usize) -> Option<&I> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
-            self.instances.get(index)
-        } else {
-            None
-        }
+    pub fn get(&self, handle: ModelHandle) -> Option<&I> {
+        self.handle_array.get(handle.0)
     }
 
-    pub fn get_mut(&mut self, handle: usize) -> Option<&mut I> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
-            self.instances.get_mut(index)
-        } else {
-            None
-        }
+    pub fn get_mut(&mut self, handle: ModelHandle) -> Option<&mut I> {
+        self.handle_array.get_mut(handle.0)
     }
 
-    fn swap_by_handle(&mut self, handle1: usize, handle2: usize) -> Result<(), InvalidHandle> {
-        if handle1 == handle2 {
-            return Ok(());
-        }
-        if let (Some(&index1), Some(&index2)) = (
-            self.handle_to_index.get(&handle1),
-            self.handle_to_index.get(&handle2),
-        ) {
-            self.handles.swap(index1, index2);
-            self.instances.swap(index1, index2);
-            self.handle_to_index.insert( handle2, index1);
-            self.handle_to_index.insert( handle1, index2);
-            Ok(())
+    fn is_visible(&self, handle: ModelHandle) -> Result<bool, InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle.0) {
+            Ok(index < self.first_invisible)
         } else {
             Err(InvalidHandle)
         }
     }
 
-    fn swap_by_index(&mut self, index1: usize, index2: usize) {
-        if index1 == index2 {
-            return;
-        }
-        let handle1 = self.handles[index1];
-        let handle2 = self.handles[index2];
-        self.handles.swap(index1, index2);
-        self.instances.swap(index1, index2);
-        self.handle_to_index.insert( handle2, index1);
-        self.handle_to_index.insert( handle1, index2);
-    }
-
-    fn is_visible(&self, handle: usize) -> Result<bool, InvalidHandle> {
-        if let Some(index) = self.handle_to_index.get(&handle) {
-            Ok(index < &self.first_invisible)
-        } else {
-            Err(InvalidHandle)
-        }
-    }
-
-    fn make_visible(&mut self, handle: usize) -> Result<(), InvalidHandle> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
+    fn make_visible(&mut self, handle: ModelHandle) -> Result<(), InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle.0) {
             if index < self.first_invisible {
                 return Ok(());
             }
-            self.swap_by_index(index, self.first_invisible);
+            self.handle_array.swap_by_index(index, self.first_invisible);
             self.first_invisible += 1;
             Ok(())
         } else {
@@ -321,12 +275,12 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    fn make_invisible(&mut self, handle: usize) -> Result<(), InvalidHandle> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
+    fn make_invisible(&mut self, handle: ModelHandle) -> Result<(), InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle.0) {
             if index >= self.first_invisible {
                 return Ok(());
             }
-            self.swap_by_index(index, self.first_invisible - 1);
+            self.handle_array.swap_by_index(index, self.first_invisible - 1);
             self.first_invisible -= 1;
             Ok(())
         } else {
@@ -334,43 +288,25 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    pub fn insert(&mut self, element: I) -> usize {
-        let handle = self.next_handle;
-        self.next_handle += 1;
-        let index = self.instances.len();
-        self.instances.push(element);
-        self.handles.push(handle);
-        self.handle_to_index.insert(handle, index);
-        handle
+    pub fn insert(&mut self, element: I) -> ModelHandle {
+        ModelHandle(self.handle_array.insert(element))
     }
 
-    pub fn insert_visibly(&mut self, element: I) -> usize {
+    pub fn insert_visibly(&mut self, element: I) -> ModelHandle {
         let new_handle = self.insert(element);
         // We just inserted this element, we know it exists
         self.make_visible(new_handle).unwrap();
         new_handle
     }
 
-    pub fn update(&mut self, handle: usize, element: I) -> RendererResult<()> {
-        let index = self.handle_to_index.get(&handle).ok_or(InvalidHandle)?;
-        self.instances[*index] = element;
+    pub fn update(&mut self, handle: ModelHandle, element: I) -> RendererResult<()> {
+        let elem = self.handle_array.get_mut(handle.0).ok_or(InvalidHandle)?;
+        *elem = element;
         Ok(())
     }
 
-    pub fn remove(&mut self, handle: usize) -> RendererResult<I> {
-        if let Some(&index) = self.handle_to_index.get(&handle) {
-            if index < self.first_invisible {
-                self.swap_by_index(index, self.first_invisible - 1);
-                self.first_invisible -= 1;
-            }
-            self.swap_by_index(self.first_invisible, self.instances.len() - 1);
-            self.handles.pop();
-            self.handle_to_index.remove(&handle);
-            // Instances should always have something to pop
-            Ok(self.instances.pop().unwrap())
-        } else {
-            Err(InvalidHandle.into())
-        }
+    pub fn remove(&mut self, handle: ModelHandle) -> RendererResult<I> {
+        self.handle_array.remove(handle.0)
     }
 
     pub fn update_vertex_buffer(
@@ -433,7 +369,7 @@ impl<V, I> Model<V, I> {
             return Ok(());
         }
         if let Some(buffer) = &mut self.instance_buffer {
-            buffer.fill(allocator, &self.instances[0..self.first_invisible])?;
+            buffer.fill(allocator, self.handle_array.get_data())?;
             Ok(())
         } else {
             let bytes = self.first_invisible * std::mem::size_of::<I>();
@@ -445,7 +381,7 @@ impl<V, I> Model<V, I> {
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 MemoryLocation::CpuToGpu,
             )?;
-            buffer.fill(allocator, &self.instances[0..self.first_invisible])?;
+            buffer.fill(allocator, self.handle_array.get_data())?;
             self.instance_buffer = Some(buffer);
             Ok(())
         }
