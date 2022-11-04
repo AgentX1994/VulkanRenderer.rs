@@ -180,7 +180,7 @@ impl BufferManager {
         data: &[T],
     ) -> RendererResult<()> {
         self.handle_array.get_mut(handle.0)
-            .ok_or(InvalidHandle.into())
+            .ok_or_else(|| InvalidHandle.into())
             .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
