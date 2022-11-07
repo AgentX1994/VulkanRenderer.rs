@@ -1,15 +1,8 @@
 use std::cell::RefCell;
-#[cfg(not(target_os = "windows"))]
-use std::ffi::c_void;
 use std::rc::Rc;
 
-#[cfg(target_os = "windows")]
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
-#[cfg(not(target_os = "windows"))]
-use winit::platform::unix::WindowExtUnix;
-use winit::dpi::PhysicalSize;
+use vulkan_rust::renderer::utils::create_render_window;
 use winit::event::{Event, WindowEvent};
-
 
 use nalgebra as na;
 use nalgebra_glm as glm;
@@ -24,52 +17,13 @@ use vulkan_rust::renderer::{error::RendererError, Renderer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-    // Create window
-    let event_loop = winit::event_loop::EventLoop::new();
-    let window = winit::window::WindowBuilder::new()
-        .with_inner_size(PhysicalSize::new(800, 600))
-        .build(&event_loop)?;
-
-    // Get display and Window
-    #[cfg(not(target_os = "windows"))]
-    let (display, surface, is_wayland) = {
-        if let Some(display) = window.xlib_display() {
-            (
-                display,
-                window.xlib_window().expect("Got X11 Display but no window") as *mut c_void,
-                false,
-            )
-        } else if let Some(display) = window.wayland_display() {
-            (
-                display,
-                window
-                    .wayland_surface()
-                    .expect("Got Wayland Display but no surface"),
-                true,
-            )
-        } else {
-            panic!("No X11 or Wayland Display available!");
-        }
-    };
-    #[cfg(target_os = "windows")]
-    let (display, surface, is_wayland) = {
-        if let RawWindowHandle::Win32(Win32WindowHandle {
-            hwnd, hinstance, ..
-        }) = window.raw_window_handle()
-        {
-            (hinstance, hwnd, false)
-        } else {
-            panic!("Could not setup window");
-        }
-    };
+    let (event_loop, window, internal_window) = create_render_window()?;
     let window_size = window.inner_size();
     let mut renderer = Renderer::new(
         "My Game Engine",
         window_size.width,
         window_size.height,
-        surface,
-        display,
-        is_wayland,
+        internal_window
     )?;
 
     let sphere = Rc::new(RefCell::new(Model::<Vertex, InstanceData>::sphere(3)));

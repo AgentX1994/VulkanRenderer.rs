@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::ffi::c_void;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -41,6 +40,7 @@ use self::context::VulkanContext;
 use self::light::LightManager;
 use self::text::TextHandler;
 use self::texture::TextureStorage;
+use self::utils::InternalWindow;
 
 pub use error::RendererResult;
 
@@ -295,11 +295,9 @@ impl Renderer {
         name: &str,
         window_width: u32,
         window_height: u32,
-        surface: *mut c_void,
-        display: *mut c_void,
-        use_wayland: bool,
+        internal_window: InternalWindow,
     ) -> RendererResult<Self> {
-        let context = VulkanContext::new(name, use_wayland, surface, display)?;
+        let context = VulkanContext::new(name, internal_window)?;
 
         // Allocator
         let mut allocator = Allocator::new(&AllocatorCreateDesc {
