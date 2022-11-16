@@ -2,14 +2,14 @@ use std::ffi::c_void;
 
 #[cfg(target_os = "windows")]
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle, Win32WindowHandle};
-#[cfg(target_os = "linux")]
-use winit::platform::unix::WindowExtUnix;
-#[cfg(target_os = "macos")]
-use winit::platform::macos::WindowExtMacOS;
 #[cfg(target_os = "macos")]
 use raw_window_metal::CAMetalLayer;
+#[cfg(target_os = "macos")]
+use winit::platform::macos::WindowExtMacOS;
+#[cfg(target_os = "linux")]
+use winit::platform::unix::WindowExtUnix;
 
-use winit::{event_loop::EventLoop, window::Window, dpi::PhysicalSize, error::OsError};
+use winit::{dpi::PhysicalSize, error::OsError, event_loop::EventLoop, window::Window};
 
 #[derive(Copy, Clone, Debug)]
 pub enum InternalWindow {
@@ -18,7 +18,10 @@ pub enum InternalWindow {
         hwnd: *const c_void,
     },
     MacOsWindow {
+        #[cfg(target_os = "macos")]
         layer: CAMetalLayer,
+        #[cfg(not(target_os = "macos"))]
+        layer: *const c_void,
     },
     LinuxWindow {
         display: *mut c_void,
@@ -30,7 +33,7 @@ pub enum InternalWindow {
 impl InternalWindow {
     #[cfg(target_os = "linux")]
     fn new(window: &Window) -> Self {
-        let (display, window, use_wayland) = if let Some(display) = window.xlib_display() {
+        let (display, window, is_wayland) = if let Some(display) = window.xlib_display() {
             (
                 display,
                 window.xlib_window().expect("Got X11 Display but no window") as *mut c_void,
@@ -47,7 +50,11 @@ impl InternalWindow {
         } else {
             panic!("No X11 or Wayland Display available!");
         };
-        Self::LinuxWindow { display, surface, is_wayland }
+        Self::LinuxWindow {
+            display,
+            surface: window,
+            is_wayland,
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -77,7 +84,7 @@ impl InternalWindow {
             raw_window_metal::Layer::Existing(layer) => Self::MacOsWindow { layer },
             // TODO do we need to deallocate this??
             raw_window_metal::Layer::Allocated(layer) => Self::MacOsWindow { layer },
-            raw_window_metal::Layer::None => panic!("Could not get CAMetalLayer!")
+            raw_window_metal::Layer::None => panic!("Could not get CAMetalLayer!"),
         }
     }
 }
@@ -91,10 +98,5 @@ pub fn create_render_window() -> Result<(EventLoop<()>, Window, InternalWindow),
 
     let internal_window = InternalWindow::new(&window);
 
-    Ok((
-        event_loop,
-        window,
-        internal_window,
-    ))
+    Ok((event_loop, window, internal_window))
 }
-

@@ -1,7 +1,7 @@
 use std::ffi::{c_void, CStr, CString};
 
 use ash::{
-    extensions::{ext, khr, mvk},
+    extensions::{ext, khr},
     vk, Instance,
 };
 
@@ -81,9 +81,10 @@ impl VulkanContext {
             .application_info(&app_info)
             .enabled_layer_names(layer_names)
             .enabled_extension_names(&instance_extension_names);
-        
+
         if matches!(internal_window, InternalWindow::MacOsWindow { .. }) {
-            instance_create_info = instance_create_info.flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR);
+            instance_create_info =
+                instance_create_info.flags(vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR);
         }
 
         unsafe { Ok(entry.create_instance(&instance_create_info, None)?) }
@@ -151,10 +152,10 @@ impl VulkanContext {
     ) -> RendererResult<ash::Device> {
         let device_extension_names = [
             ash::extensions::khr::Swapchain::name().as_ptr(),
-            #[cfg(target_os="macos")]
-            vk::KhrPortabilitySubsetFn::name().as_ptr()
-            ];
-        
+            #[cfg(target_os = "macos")]
+            vk::KhrPortabilitySubsetFn::name().as_ptr(),
+        ];
+
         // create logical device
         let priorities = [1.0f32];
         let queue_infos = if graphics_queue_index != transfer_queue_index {
@@ -189,12 +190,9 @@ impl VulkanContext {
         Ok(device)
     }
 
-    pub fn new(
-        name: &str,
-        internal_window: InternalWindow,
-    ) -> RendererResult<Self> {
+    pub fn new(name: &str, internal_window: InternalWindow) -> RendererResult<Self> {
         // Layers
-        let mut layers = unsafe {
+        let layers = unsafe {
             [CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0").as_ptr()]
         };
 
@@ -229,34 +227,44 @@ impl VulkanContext {
             unsafe { debug_utils.create_debug_utils_messenger(&debug_create_info, None)? };
 
         // Create surface
-            let surface =match internal_window {
+        let surface = match internal_window {
             InternalWindow::WindowsWindow { hinstance, hwnd } => {
                 let win32_create_info = vk::Win32SurfaceCreateInfoKHR::builder()
                     .hinstance(hinstance)
                     .hwnd(hwnd);
-                let win32_surface_loader = ash::extensions::khr::Win32Surface::new(&entry, &instance);
+                let win32_surface_loader =
+                    ash::extensions::khr::Win32Surface::new(&entry, &instance);
                 unsafe { win32_surface_loader.create_win32_surface(&win32_create_info, None)? }
-            },
+            }
             InternalWindow::MacOsWindow { layer } => {
-                let metal_create_info = vk::MetalSurfaceCreateInfoEXT::builder()
-                    .layer(layer as *const c_void);
+                let metal_create_info =
+                    vk::MetalSurfaceCreateInfoEXT::builder().layer(layer as *const c_void);
                 let metal_surface_loader = ext::MetalSurface::new(&entry, &instance);
                 unsafe { metal_surface_loader.create_metal_surface(&metal_create_info, None)? }
-            },
-            InternalWindow::LinuxWindow { display, surface, is_wayland } => if is_wayland {
-                let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR::builder()
-                    .display(display)
-                    .surface(surface);
-                let wayland_surface_loader =
-                    ash::extensions::khr::WaylandSurface::new(&entry, &instance);
-                unsafe { wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)? }
-            } else {
-                let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-                    .window(surface as u64)
-                    .dpy(display as *mut *const c_void);
-                let xlib_surface_loader = ash::extensions::khr::XlibSurface::new(&entry, &instance);
-                unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? }
-            },
+            }
+            InternalWindow::LinuxWindow {
+                display,
+                surface,
+                is_wayland,
+            } => {
+                if is_wayland {
+                    let wayland_create_info = vk::WaylandSurfaceCreateInfoKHR::builder()
+                        .display(display)
+                        .surface(surface);
+                    let wayland_surface_loader =
+                        ash::extensions::khr::WaylandSurface::new(&entry, &instance);
+                    unsafe {
+                        wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)?
+                    }
+                } else {
+                    let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
+                        .window(surface as u64)
+                        .dpy(display as *mut *const c_void);
+                    let xlib_surface_loader =
+                        ash::extensions::khr::XlibSurface::new(&entry, &instance);
+                    unsafe { xlib_surface_loader.create_xlib_surface(&x11_create_info, None)? }
+                }
+            }
         };
 
         let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
