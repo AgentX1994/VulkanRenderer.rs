@@ -361,7 +361,7 @@ impl Renderer {
 
         let command_buffer_allocate_info = vk::CommandBufferAllocateInfo::builder()
             .command_pool(graphics_command_pool)
-            .command_buffer_count(swapchain.get_actual_image_count() as u32);
+            .command_buffer_count(swapchain.get_actual_image_count());
         let command_buffers = unsafe {
             context
                 .device

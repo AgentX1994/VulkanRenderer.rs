@@ -16,6 +16,8 @@ use super::utils::{Handle, HandleArray};
 use super::vertex::Vertex;
 use super::{InstanceData, RendererResult};
 
+pub mod loaders;
+
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct ModelHandle(Handle);
 
@@ -48,6 +50,19 @@ where
 }
 
 impl<V, I> Model<V, I> {
+    pub fn new(vertices: Vec<V>, indices: Vec<u32>) -> Model<V, I> {
+        
+        Model {
+            vertex_data: vertices,
+            index_data: indices,
+            handle_array: Default::default(),
+            first_invisible: 0,
+            vertex_buffer: None,
+            index_buffer: None,
+            instance_buffer: None,
+        }
+    }
+
     pub fn cube() -> Model<Vertex, InstanceData> {
         // TODO Fix normals?
         let lbf = Vertex::new(
@@ -90,22 +105,17 @@ impl<V, I> Model<V, I> {
             Vec3::new(1.0, -1.0, 1.0),
             Vec2::new(0.5, 0.5),
         );
-        Model {
-            vertex_data: vec![lbf, lbb, ltf, ltb, rbf, rbb, rtf, rtb],
-            index_data: vec![
+        Model::new(
+            vec![lbf, lbb, ltf, ltb, rbf, rbb, rtf, rtb],
+            vec![
                 0, 1, 5, 0, 5, 4, // bottom
                 2, 7, 3, 2, 6, 7, // top
                 0, 6, 2, 0, 4, 6, // front
                 1, 3, 7, 1, 7, 5, // back
                 0, 2, 1, 1, 2, 3, // left
                 4, 5, 6, 5, 7, 6, // right
-            ],
-            handle_array: Default::default(),
-            first_invisible: 0,
-            vertex_buffer: None,
-            index_buffer: None,
-            instance_buffer: None,
-        }
+            ]
+        )
     }
 
     pub fn icosahedron() -> Model<Vertex, InstanceData> {
@@ -192,9 +202,9 @@ impl<V, I> Model<V, I> {
             let phi = (norm.y.asin() / std::f32::consts::PI) + 0.5;
             v.uv = Vec2::new(theta, phi);
         }
-        Model {
+        Model::new(
             vertex_data,
-            index_data: vec![
+            vec![
                 0, 9, 8, //
                 0, 8, 4, //
                 0, 4, 1, //
@@ -215,13 +225,8 @@ impl<V, I> Model<V, I> {
                 3, 7, 11, //
                 6, 7, 9, //
                 6, 11, 7, //
-            ],
-            handle_array: Default::default(),
-            first_invisible: 0,
-            vertex_buffer: None,
-            index_buffer: None,
-            instance_buffer: None,
-        }
+            ]
+        )
     }
 
     pub fn sphere(refinements: u32) -> Model<Vertex, InstanceData> {

@@ -1,6 +1,7 @@
 use std::error;
 use std::fmt;
 use std::io;
+use std::num::{ParseIntError, ParseFloatError};
 
 use ash::vk;
 use gpu_allocator::AllocationError;
@@ -26,6 +27,8 @@ pub enum RendererError {
     InvalidHandle(InvalidHandle),
     IoError(io::Error),
     FontError(&'static str),
+    FloatParseError(ParseFloatError),
+    IntParseError(ParseIntError)
 }
 
 impl fmt::Display for RendererError {
@@ -37,6 +40,8 @@ impl fmt::Display for RendererError {
             RendererError::InvalidHandle(ref e) => e.fmt(f),
             RendererError::IoError(ref e) => e.fmt(f),
             RendererError::FontError(ref e) => e.fmt(f),
+            RendererError::FloatParseError(ref e) => e.fmt(f),
+            RendererError::IntParseError(ref e) => e.fmt(f),
         }
     }
 }
@@ -50,6 +55,8 @@ impl error::Error for RendererError {
             RendererError::InvalidHandle(ref e) => Some(e),
             RendererError::IoError(ref e) => Some(e),
             RendererError::FontError(_) => None, // Why fontdue???
+            RendererError::FloatParseError(ref e) => Some(e),
+            RendererError::IntParseError(ref e) => Some(e),
         }
     }
 }
@@ -87,6 +94,18 @@ impl From<io::Error> for RendererError {
 impl From<&'static str> for RendererError {
     fn from(e: &'static str) -> Self {
         RendererError::FontError(e)
+    }
+}
+
+impl From<ParseFloatError> for RendererError {
+    fn from(e: ParseFloatError) -> Self {
+        RendererError::FloatParseError(e)
+    }
+}
+
+impl From<ParseIntError> for RendererError {
+    fn from(e: ParseIntError) -> Self {
+        RendererError::IntParseError(e)
     }
 }
 

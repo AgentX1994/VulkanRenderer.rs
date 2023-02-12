@@ -9,6 +9,7 @@ use nalgebra_glm as glm;
 
 use vulkan_rust::renderer::camera::Camera;
 use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
+use vulkan_rust::renderer::model::loaders::obj;
 use vulkan_rust::renderer::model::Model;
 use vulkan_rust::renderer::scene::{SceneObject, SceneTree};
 use vulkan_rust::renderer::vertex::Vertex;
@@ -23,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "My Game Engine",
         window_size.width,
         window_size.height,
-        internal_window
+        internal_window,
     )?;
 
     let sphere = Rc::new(RefCell::new(Model::<Vertex, InstanceData>::sphere(3)));
@@ -71,7 +72,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             renderer.buffer_manager.clone(),
         )?;
     }
-    renderer.models = vec![sphere];
+    // Try loading an obj model
+    let car_model = Rc::new(RefCell::new(obj::load_obj("models/alfa147.obj")?));
+    {
+        let car_object = SceneObject::new_empty();
+        SceneObject::add_child(&root, &car_object);
+        {
+            let mut obj_ref = car_object.borrow_mut();
+            obj_ref.position = glm::Vec3::new(0f32, 15f32, 20f32);
+            obj_ref.scaling = glm::Vec3::new(0.1f32, 0.1f32, 0.1f32);
+            obj_ref.rotation = glm::Quat::from_polar_decomposition(
+                1.0f32,
+                std::f32::consts::FRAC_2_PI,
+                na::Unit::<glm::Vec3>::new_normalize(glm::Vec3::new(1.0f32, 0.0f32, 0.0f32)),
+            );
+            obj_ref.metallic = 0.5f32;
+            obj_ref.roughness = 0.1f32;
+            // TODO: need a way to specify materials
+            obj_ref.texture_id = 3;
+            obj_ref.set_model(&car_model)?;
+            obj_ref.update_transform(true)?;
+        }
+    }
+    if let Some(allo) = &mut renderer.allocator {
+        // TODO how to structure this properly?
+        let mut car = car_model.borrow_mut();
+        car.update_vertex_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
+        car.update_index_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
+        car.update_instance_buffer(
+            &renderer.context.device,
+            allo,
+            renderer.buffer_manager.clone(),
+        )?;
+    }
+    renderer.models = vec![sphere, car_model];
 
     let mut lights = LightManager::default();
     lights.add_light(DirectionalLight {
@@ -108,6 +150,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _tex1_index = renderer.new_texture_from_file("texture.png")?;
     let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
     let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
+    let _tex3_index = renderer.new_texture_from_file("plain_white.jpg")?;
     renderer.update_textures()?;
 
     // Create some text

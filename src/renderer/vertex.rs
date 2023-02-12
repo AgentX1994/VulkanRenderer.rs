@@ -1,3 +1,5 @@
+use std::hash::Hash;
+
 use ash::vk;
 use memoffset::offset_of;
 use nalgebra_glm::{Vec2, Vec3};
@@ -131,7 +133,43 @@ impl Vertex {
                 binding: 1,
                 format: vk::Format::R8_UINT,
                 offset: 148u32,
-            }
+            },
         ]
+    }
+}
+
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        // I want this equality to be bit-wise, rather than float wise
+        // Unfortunately, unaligned access is not allowed, so I can't just
+        // call to_bits() on each float, so I have to do this monstrosity instead
+        // This should work since the structs are packed
+        let self_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                std::mem::size_of::<Vertex>(),
+            )
+        };
+        let other_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                other as *const Self as *const u8,
+                std::mem::size_of::<Vertex>(),
+            )
+        };
+        self_bytes == other_bytes
+    }
+}
+
+impl Eq for Vertex {}
+
+impl Hash for Vertex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let self_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                self as *const Self as *const u8,
+                std::mem::size_of::<Vertex>(),
+            )
+        };
+        self_bytes.hash(state);
     }
 }
