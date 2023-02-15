@@ -1597,6 +1597,7 @@ name = "vulkan_rust"
 version = "0.1.0"
 dependencies = [
  "ash",
+ "backtrace",
  "env_logger",
  "fontdue",
  "gpu-allocator",

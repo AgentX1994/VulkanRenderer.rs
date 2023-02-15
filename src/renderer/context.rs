@@ -258,7 +258,7 @@ impl VulkanContext {
                     }
                 } else {
                     let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-                        .window(surface as u64)
+                        .window(surface as u32)
                         .dpy(display as *mut *const c_void);
                     let xlib_surface_loader =
                         ash::extensions::khr::XlibSurface::new(&entry, &instance);

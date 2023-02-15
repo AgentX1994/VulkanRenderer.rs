@@ -64,7 +64,7 @@ impl InternalWindow {
                 hwnd, hinstance, ..
             }) = window.raw_window_handle()
             {
-                (hinstance, hwnd)
+                (hwnd, hinstance)
             } else {
                 panic!("Could not setup window");
             }
