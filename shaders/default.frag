@@ -79,7 +79,7 @@ void main() {
     int num_dir = int(sbo.num_directional);
     int num_point = int(sbo.num_point);
 
-    vec3 surface_color = texture(texture_sampler[texture_id], uv).rgb;
+    vec3 surface_color = texture(texture_sampler[texture_id], uv).rgb + color;
 
     for (int i = 0; i < num_dir; i++) {
         vec3 data1 = sbo.data[2*i];

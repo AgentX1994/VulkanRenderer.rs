@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -13,7 +13,6 @@ use memoffset::offset_of;
 
 use super::buffer::Buffer;
 use super::buffer::BufferManager;
-use super::context::VulkanContext;
 use super::error::InvalidHandle;
 use super::error::RendererError;
 use super::pipeline::GraphicsPipeline;
@@ -21,18 +20,32 @@ use super::shader_module::ShaderModule;
 use super::swapchain::Swapchain;
 use super::RendererResult;
 
-pub struct TextTexture {
-    image: vk::Image,
-    pub image_view: vk::ImageView,
-    pub sampler: vk::Sampler,
-    allocation: Option<Allocation>,
+struct CharacterData {
+    _advance_width: f32,
+    _advance_height: f32,
+    width: usize,
+    height: usize,
+    _left: f32,
+    _top: f32,
+    texture_x: f32,
 }
 
-impl TextTexture {
+struct TextAtlasTexture {
+    width: f32,
+    height: f32,
+    image: vk::Image,
+    image_view: vk::ImageView,
+    sampler: vk::Sampler,
+    allocation: Option<Allocation>,
+    char_data: HashMap<u16, CharacterData>,
+}
+
+impl TextAtlasTexture {
     pub fn from_u8s(
         data: &[u8],
         width: u32,
         height: u32,
+        char_data: HashMap<u16, CharacterData>,
         device: &Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
@@ -56,6 +69,7 @@ impl TextTexture {
 
         //  allocate memory for image
         let reqs = unsafe { device.get_image_memory_requirements(image) };
+        println!("Creating Texture atlas of size {}x{}, {} bytes", width, height, reqs.size);
         let allocation = allocator.allocate(&AllocationCreateDesc {
             name: "text texture",
             requirements: reqs,
@@ -207,15 +221,18 @@ impl TextTexture {
 
         // Cleanup
         unsafe { device.destroy_fence(fence, None) };
-        buffer.queue_free()?;
+        buffer.queue_free(None)?;
         unsafe { device.free_command_buffers(*command_pool, &[copy_buf]) };
 
         // Done
-        Ok(TextTexture {
+        Ok(TextAtlasTexture {
+            width: width as f32,
+            height: height as f32,
             image,
             image_view,
             sampler,
             allocation: Some(allocation),
+            char_data,
         })
     }
 
@@ -246,11 +263,10 @@ pub struct TextVertexData {
     pub position: [f32; 3],
     pub texture_coordinates: [f32; 2],
     pub color: [f32; 3],
-    pub texture_id: u32,
 }
 
 impl TextVertexData {
-    pub fn get_vertex_attributes() -> [vk::VertexInputAttributeDescription; 4] {
+    pub fn get_vertex_attributes() -> [vk::VertexInputAttributeDescription; 3] {
         [
             vk::VertexInputAttributeDescription {
                 binding: 0,
@@ -270,12 +286,6 @@ impl TextVertexData {
                 offset: offset_of!(TextVertexData, color) as u32,
                 format: vk::Format::R32G32B32_SFLOAT,
             },
-            vk::VertexInputAttributeDescription {
-                binding: 0,
-                location: 3,
-                offset: offset_of!(TextVertexData, texture_id) as u32,
-                format: vk::Format::R8G8B8A8_UINT,
-            },
         ]
     }
 
@@ -288,23 +298,63 @@ impl TextVertexData {
     }
 }
 
+struct TextBuffer {
+    px: f32,
+    last_image_index: Option<u32>,
+    vertex_buffer: Buffer,
+    vertex_data: Vec<TextVertexData>,
+}
+
+impl TextBuffer {
+    fn new(
+        px: f32,
+        vertex_data: Vec<TextVertexData>,
+        device: &Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Self> {
+        if vertex_data.is_empty() {
+            // TODO handle this?
+            panic!("Given empty vertex data");
+        }
+        let bytes = (vertex_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
+        let mut vertex_buffer = BufferManager::new_buffer(
+            buffer_manager,
+            device,
+            allocator,
+            bytes,
+            vk::BufferUsageFlags::VERTEX_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+        vertex_buffer.fill(allocator, &vertex_data)?;
+        Ok(Self {
+            px,
+            last_image_index: None,
+            vertex_buffer,
+            vertex_data,
+        })
+    }
+
+    fn destroy(&mut self) {
+        self.vertex_buffer.queue_free(self.last_image_index).expect("Invalid Buffer!?");
+    }
+}
+
 pub struct TextHandler {
-    vertex_data: HashMap<usize, Vec<TextVertexData>>,
-    vertex_buffer: Option<Buffer>,
-    textures: Vec<TextTexture>,
-    texture_ids: HashMap<fontdue::layout::GlyphRasterConfig, u32>,
-    fonts: Vec<fontdue::Font>,
+    vertex_data: HashMap<usize, TextBuffer>,
+    font: fontdue::Font,
+    atlases: Vec<(f32, TextAtlasTexture)>,
     pipeline: Option<GraphicsPipeline>,
     shader_module: ShaderModule,
     descriptor_pool: Option<vk::DescriptorPool>,
-    descriptor_sets: Vec<vk::DescriptorSet>,
-    number_of_textures: usize,
+    // TODO deal with the fact that px is f32
+    descriptor_sets: HashMap<u32, Vec<vk::DescriptorSet>>,
 }
 
 impl TextHandler {
     pub fn new<P: AsRef<std::path::Path>>(
         device: &Device,
-        standard_font: P,
+        font_path: P,
     ) -> RendererResult<TextHandler> {
         let shader_module = ShaderModule::new(
             device,
@@ -312,36 +362,86 @@ impl TextHandler {
             vk_shader_macros::include_glsl!("./shaders/text.frag", kind: frag),
         )?;
 
-        let mut text_handler = TextHandler {
+        let font_data = std::fs::read(font_path)?;
+        let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
+
+        Ok(TextHandler {
             vertex_data: HashMap::new(),
-            vertex_buffer: None,
-            textures: vec![],
-            texture_ids: HashMap::new(),
-            fonts: vec![],
+            font,
+            atlases: vec![],
             shader_module,
             pipeline: None,
             descriptor_pool: None,
-            descriptor_sets: vec![],
-            number_of_textures: 0,
-        };
-
-        text_handler.load_font(standard_font)?;
-        Ok(text_handler)
+            descriptor_sets: HashMap::new(),
+        })
     }
 
-    pub fn load_font<P: AsRef<Path>>(&mut self, path: P) -> RendererResult<usize> {
-        let font_data = std::fs::read(path)?;
-        let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
-        let index = self.fonts.len();
-        self.fonts.push(font);
-        Ok(index)
+    fn generate_texture_atlas(
+        &mut self,
+        px: f32,
+        device: &Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+        command_pool: &vk::CommandPool,
+        queue: &vk::Queue,
+    ) -> RendererResult<TextAtlasTexture> {
+        let mut char_data = HashMap::new();
+        let mut width: usize = 0;
+        let mut height: usize = 0;
+        for (_c, i) in self.font.chars() {
+            let metrics = self.font.metrics_indexed((*i).into(), px);
+            width += metrics.width;
+            height = std::cmp::max(height, metrics.height);
+        }
+        let mut data = vec![0; width * height];
+
+        let mut cur_x = 0usize;
+        for (_c, i) in self.font.chars() {
+            let (metrics, glyph_data) = self.font.rasterize_indexed((*i).into(), px);
+            let character_data = CharacterData {
+                _advance_width: metrics.advance_width,
+                _advance_height: metrics.advance_height,
+                width: metrics.width,
+                height: metrics.height,
+                _left: metrics.bounds.xmin,
+                _top: metrics.bounds.ymin,
+                texture_x: cur_x as f32 / width as f32,
+            };
+            char_data.insert((*i).into(), character_data);
+            for y in 0..metrics.height {
+                for x in 0..metrics.width {
+                    data[cur_x + x + y * width] = glyph_data[x + y * metrics.width];
+                }
+            }
+            cur_x += metrics.width;
+        }
+
+        let atlas = TextAtlasTexture::from_u8s(
+            &data,
+            width as u32,
+            height as u32,
+            char_data,
+            device,
+            allocator,
+            buffer_manager,
+            command_pool,
+            queue,
+        )?;
+
+        Ok(atlas)
     }
 
     pub fn create_letters(
-        &self,
+        &mut self,
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
-    ) -> Vec<Letter> {
+        device: &Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+        command_pool: &vk::CommandPool,
+        queue: &vk::Queue,
+    ) -> RendererResult<(Vec<Letter>, bool)> {
+        let mut added_atlas = false;
         let mut layout =
             fontdue::layout::Layout::new(fontdue::layout::CoordinateSystem::PositiveYUp);
         let settings = fontdue::layout::LayoutSettings {
@@ -349,47 +449,39 @@ impl TextHandler {
         };
         layout.reset(&settings);
         for style in styles {
-            layout.append(&self.fonts, style);
+            layout.append(&[&self.font], style);
+            if self
+                .atlases
+                .iter()
+                .find(|(px, _)| *px == style.px)
+                .is_none()
+            {
+                let atlas = self.generate_texture_atlas(
+                    style.px,
+                    device,
+                    allocator,
+                    buffer_manager.clone(),
+                    command_pool,
+                    queue,
+                )?;
+                self.atlases.push((style.px, atlas));
+                added_atlas = true;
+            }
         }
-        let output = layout.glyphs();
-        output
-            .iter()
-            .map(|&glyph| Letter {
+        let mut output = vec![];
+        for glyph in layout.glyphs() {
+            output.push(Letter {
                 color,
-                position_and_shape: glyph,
-            })
-            .collect()
+                position_and_shape: *glyph,
+            });
+        }
+        Ok((output, added_atlas))
     }
 
-    pub fn new_texture_from_u8s(
+    pub fn add_text(
         &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-        device: &Device,
-        allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>,
-        command_pool: &vk::CommandPool,
-        queue: &vk::Queue,
-    ) -> RendererResult<usize> {
-        let new_texture = TextTexture::from_u8s(
-            data,
-            width,
-            height,
-            device,
-            allocator,
-            buffer_manager,
-            command_pool,
-            queue,
-        )?;
-        let new_id = self.textures.len();
-        self.textures.push(new_texture);
-        Ok(new_id)
-    }
-
-    pub fn create_vertex_data(
-        &mut self,
-        letters: Vec<Letter>,
+        styles: &[&fontdue::layout::TextStyle],
+        color: [f32; 3],
         position: (u32, u32), // in pixels
         window: &winit::window::Window,
         device: &Device,
@@ -399,39 +491,54 @@ impl TextHandler {
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
         swapchain: &Swapchain,
-    ) -> RendererResult<usize> {
+    ) -> RendererResult<Vec<usize>> {
+        let (letters, atlas_added) = self.create_letters(
+            styles,
+            color,
+            device,
+            allocator,
+            buffer_manager.clone(),
+            command_pool,
+            queue,
+        )?;
         let screen_size = window.inner_size();
-        let mut need_texture_update = false;
-        let mut vertex_data = Vec::with_capacity(6 * letters.len());
+        let mut vertex_data = vec![];
+        let mut ret_ids = vec![];
+        let mut px = 0.0f32;
         for l in letters {
-            let id_option = self.texture_ids.get(&l.position_and_shape.key);
-            let id = if let Some(id) = id_option {
-                *id
+            if px == 0.0f32 {
+                px = l.position_and_shape.key.px;
+            } else if px != l.position_and_shape.key.px {
+                // The last style ended, add a new one
+                let id: usize = rand::random();
+                let text_buffer =
+                    TextBuffer::new(px, vertex_data, device, allocator, buffer_manager.clone())?;
+                self.vertex_data.insert(id, text_buffer);
+                ret_ids.push(id);
+                px = l.position_and_shape.key.px;
+                vertex_data = vec![];
+            }
+            let atlas = &self
+                .atlases
+                .iter()
+                .find(|(inner_px, _atlas)| *inner_px == px)
+                .expect("No atlas for px?")
+                .1;
+            let char_data = if let Some(char_data) =
+                atlas.char_data.get(&l.position_and_shape.key.glyph_index)
+            {
+                char_data
             } else {
-                let (metrics, bitmap) = self.fonts[l.position_and_shape.font_index]
-                    .rasterize(l.position_and_shape.parent, l.position_and_shape.key.px);
-                if bitmap.is_empty() {
-                    continue;
-                }
-                need_texture_update = true;
-                let id = self.new_texture_from_u8s(
-                    &bitmap,
-                    metrics.width as u32,
-                    metrics.height as u32,
-                    device,
-                    allocator,
-                    buffer_manager.clone(),
-                    command_pool,
-                    queue,
-                )? as u32;
-                self.texture_ids.insert(l.position_and_shape.key, id);
-                id
+                println!("Could not find char data for glyph?");
+                continue;
             };
-
-            let left =
-                2.0 * (l.position_and_shape.x + position.0 as f32) / screen_size.width as f32 - 1.0;
+            let left = 2.0 * (l.position_and_shape.x + position.0 as f32)
+                / screen_size.width as f32
+                - 1.0;
             let right = 2.0
-                * (l.position_and_shape.x + position.0 as f32 + l.position_and_shape.width as f32)
+                * (l.position_and_shape.x
+                    + position.0 as f32
+                    + l.position_and_shape.width as f32)
                 / screen_size.width as f32
                 - 1.0;
             let top = 2.0
@@ -442,29 +549,29 @@ impl TextHandler {
             let bottom = 2.0 * (-l.position_and_shape.y + position.1 as f32)
                 / screen_size.height as f32
                 - 1.0;
+            let start_u = char_data.texture_x;
+            let start_v = 0f32;
+            let end_u = start_u + char_data.width as f32 / atlas.width;
+            let end_v = start_v + char_data.height as f32 / atlas.height;
             let v1 = TextVertexData {
                 position: [left, top, 0.0],
-                texture_coordinates: [0.0, 0.0],
+                texture_coordinates: [start_u, start_v],
                 color: l.color,
-                texture_id: id,
             };
             let v2 = TextVertexData {
                 position: [left, bottom, 0.0],
-                texture_coordinates: [0.0, 1.0],
+                texture_coordinates: [start_u, end_v],
                 color: l.color,
-                texture_id: id,
             };
             let v3 = TextVertexData {
                 position: [right, top, 0.0],
-                texture_coordinates: [1.0, 0.0],
+                texture_coordinates: [end_u, start_v],
                 color: l.color,
-                texture_id: id,
             };
             let v4 = TextVertexData {
                 position: [right, bottom, 0.0],
-                texture_coordinates: [1.0, 1.0],
+                texture_coordinates: [end_u, end_v],
                 color: l.color,
-                texture_id: id,
             };
             vertex_data.push(v1);
             vertex_data.push(v2);
@@ -472,41 +579,64 @@ impl TextHandler {
             vertex_data.push(v3);
             vertex_data.push(v2);
             vertex_data.push(v4);
+            if px == 0.0f32 {
+                panic!("px size is 0.0f32!");
+            }
         }
         let id: usize = rand::random();
-        self.vertex_data.insert(id, vertex_data);
-        if need_texture_update {
-            self.update_textures(render_pass, swapchain, device)?;
+        let text_buffer =
+            TextBuffer::new(px, vertex_data, device, allocator, buffer_manager.clone())?;
+        self.vertex_data.insert(id, text_buffer);
+        ret_ids.push(id);
+        if atlas_added {
+            self.update_descriptors(render_pass, swapchain, device)?;
         }
-        Ok(id)
+        Ok(ret_ids)
     }
 
     pub fn remove_text_by_id(
         &mut self,
-        context: &VulkanContext,
+        device: &Device,
         allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>,
         id: usize,
     ) -> RendererResult<()> {
-        if self.vertex_data.remove(&id).is_some() {
-            self.update_vertex_buffer(&context.device, allocator, buffer_manager)?;
+        // TODO deal with the fact px is f32
+        // let old_set = self
+        //     .vertex_data
+        //     .values()
+        //     .map(|buf| buf.px as u64)
+        //     .collect::<HashSet<u64>>();
+        if let Some(mut vert_data) = self.vertex_data.remove(&id) {
+            vert_data.destroy();
+            // let new_set = self
+            //     .vertex_data
+            //     .values()
+            //     .map(|buf| buf.px as u64)
+            //     .collect::<HashSet<u64>>();
+            // let removed_pxs = old_set
+            //     .difference(&new_set)
+            //     .map(|x| *x)
+            //     .collect::<HashSet<u64>>();
+            // for (atlas_px, atlas) in self.atlases.iter_mut() {
+            //     if removed_pxs.contains(&(*atlas_px as u64)) {
+            //         atlas.destroy(device, allocator);
+            //     }
+            // }
+            // self.atlases
+            //     .retain(|(atlas_px, _atlas)| !removed_pxs.contains(&(*atlas_px as u64)));
+
             Ok(())
         } else {
             Err(RendererError::InvalidHandle(InvalidHandle))
         }
     }
 
-    pub fn update_textures(
+    pub fn update_descriptors(
         &mut self,
         render_pass: &vk::RenderPass,
         swapchain: &Swapchain,
         device: &Device,
     ) -> RendererResult<()> {
-        let amount = self.textures.len();
-        if amount > self.number_of_textures {
-            self.number_of_textures = amount;
-            self.clear_pipeline()
-        }
         if self.pipeline.is_none() {
             self.pipeline = Some(GraphicsPipeline::new_text(
                 device,
@@ -515,7 +645,6 @@ impl TextHandler {
                 self.shader_module.get_stages(),
                 &TextVertexData::get_vertex_attributes(),
                 &TextVertexData::get_vertex_bindings(),
-                amount as u32,
             )?);
         }
         if let Some(pool) = self.descriptor_pool {
@@ -529,7 +658,7 @@ impl TextHandler {
                 * swapchain.get_actual_image_count(),
         }];
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count())
+            .max_sets(swapchain.get_actual_image_count()*self.atlases.len() as u32)
             .pool_sizes(&pool_sizes);
         let descriptor_pool =
             unsafe { device.create_descriptor_pool(&descriptor_pool_info, None) }?;
@@ -540,107 +669,69 @@ impl TextHandler {
             self.pipeline.as_ref().unwrap().descriptor_set_layouts[0];
             swapchain.get_actual_image_count() as usize
         ];
-        let descriptor_counts_text =
-            vec![amount as u32; swapchain.get_actual_image_count() as usize];
-        let mut variable_descriptor_allocate_info_text =
-            vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
-                .descriptor_counts(&descriptor_counts_text);
         let descriptor_set_allocate_info_text = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(descriptor_pool)
-            .set_layouts(&desc_layouts_text)
-            .push_next(&mut variable_descriptor_allocate_info_text);
-        let descriptor_sets_text =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_text) }?;
-        for i in 0..swapchain.get_actual_image_count() {
-            let image_infos: Vec<vk::DescriptorImageInfo> = self
-                .textures
-                .iter()
-                .map(|t| vk::DescriptorImageInfo {
+            .set_layouts(&desc_layouts_text);
+        self.descriptor_sets.clear();
+        for (px, atlas) in self.atlases.iter() {
+            let descriptor_sets_text =
+                unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_text) }?;
+            for i in 0..swapchain.get_actual_image_count() {
+                let image_infos: [vk::DescriptorImageInfo; 1] = [vk::DescriptorImageInfo {
                     image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    image_view: t.image_view,
-                    sampler: t.sampler,
-                })
-                .collect();
-            let descriptor_write_image = vk::WriteDescriptorSet::builder()
-                .dst_set(descriptor_sets_text[i as usize])
-                .dst_binding(0)
-                .dst_array_element(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&image_infos)
-                .build();
-            unsafe {
-                device.update_descriptor_sets(&[descriptor_write_image], &[]);
+                    image_view: atlas.image_view,
+                    sampler: atlas.sampler,
+                }];
+                let descriptor_write_image = vk::WriteDescriptorSet::builder()
+                    .dst_set(descriptor_sets_text[i as usize])
+                    .dst_binding(0)
+                    .dst_array_element(0)
+                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                    .image_info(&image_infos)
+                    .build();
+                unsafe {
+                    device.update_descriptor_sets(&[descriptor_write_image], &[]);
+                }
             }
+            self.descriptor_sets.insert(*px as u32, descriptor_sets_text);
         }
-        self.descriptor_sets = descriptor_sets_text;
         Ok(())
     }
 
-    pub fn update_vertex_buffer(
-        &mut self,
-        device: &Device,
-        allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>,
-    ) -> RendererResult<()> {
-        if self.vertex_data.is_empty() {
-            return Ok(());
-        }
-        // This is probably pretty slow but I am lazy
-        // TODO find a better text handling solution
-        let mut vert_data = vec![];
-        for verts in self.vertex_data.values() {
-            vert_data.extend_from_slice(verts);
-        }
-        if let Some(buffer) = &mut self.vertex_buffer {
-            buffer.fill(allocator, &vert_data)?;
-            Ok(())
-        } else {
-            let bytes = (vert_data.len() * std::mem::size_of::<TextVertexData>()) as u64;
-            let mut buffer = BufferManager::new_buffer(
-                buffer_manager,
-                device,
-                allocator,
-                bytes,
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                MemoryLocation::CpuToGpu,
-            )?;
-            buffer.fill(allocator, &vert_data)?;
-            self.vertex_buffer = Some(buffer);
-            Ok(())
-        }
-    }
-
-    pub fn draw(&self, device: &Device, cmd_buf: vk::CommandBuffer, index: usize) {
+    pub fn draw(&mut self, device: &Device, cmd_buf: vk::CommandBuffer, index: usize) {
         if let Some(pipeline) = &self.pipeline {
-            if self.descriptor_sets.len() > index {
+            unsafe {
+                device.cmd_bind_pipeline(
+                    cmd_buf,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    pipeline.pipeline,
+                );
+            }
+            for text_buffer in self.vertex_data.values_mut() {
                 unsafe {
-                    device.cmd_bind_pipeline(
-                        cmd_buf,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline.pipeline,
-                    );
-
+                    let descriptor_set = if let Some(desc_set_vec) = self.descriptor_sets.get(&(text_buffer.px as u32)) {
+                        desc_set_vec[index]
+                    } else {
+                        panic!("Could not get descriptor set for px");
+                    };
                     device.cmd_bind_descriptor_sets(
                         cmd_buf,
                         vk::PipelineBindPoint::GRAPHICS,
                         pipeline.pipeline_layout,
                         0,
-                        &[self.descriptor_sets[index]],
+                        &[descriptor_set],
                         &[],
                     );
-                }
-                if let Some(buf) = &self.vertex_buffer {
-                    unsafe {
-                        let int_buf = buf.get_buffer();
-                        device.cmd_bind_vertex_buffers(cmd_buf, 0, &[int_buf.buffer], &[0]);
-                        device.cmd_draw(
-                            cmd_buf,
-                            self.vertex_data.values().map(|v| v.len()).sum::<usize>() as u32,
-                            1, // instance count
-                            0,
-                            0,
-                        );
-                    }
+                    let int_buf = text_buffer.vertex_buffer.get_buffer();
+                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &[int_buf.buffer], &[0]);
+                    device.cmd_draw(
+                        cmd_buf,
+                        text_buffer.vertex_data.len() as u32,
+                        1, // instance count
+                        0,
+                        0,
+                    );
+                    text_buffer.last_image_index = Some(index as u32);
                 }
             }
         }
@@ -659,12 +750,12 @@ impl TextHandler {
                 device.destroy_descriptor_pool(pool, None);
             }
         }
-
-        if let Some(mut b) = self.vertex_buffer.take() {
-            b.queue_free().expect("Invalid Buffer!?");
+        for text_buffer in self.vertex_data.values_mut() {
+            text_buffer.vertex_buffer.queue_free(text_buffer.last_image_index).expect("Could not queue buffer for free");
         }
-        for t in &mut self.textures {
-            t.destroy(device, allocator);
+        self.vertex_data.clear();
+        for (_px, mut atlas) in self.atlases.drain(0..self.atlases.len()) {
+            atlas.destroy(device, allocator);
         }
         self.shader_module.destroy();
     }

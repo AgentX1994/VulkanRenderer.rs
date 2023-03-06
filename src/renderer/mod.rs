@@ -24,8 +24,8 @@ mod shader_module;
 mod swapchain;
 mod text;
 mod texture;
-pub mod vertex;
 pub mod utils;
+pub mod vertex;
 
 use buffer::Buffer;
 use camera::Camera;
@@ -514,8 +514,11 @@ impl Renderer {
             self.descriptor_sets_texture = c;
             self.update_textures()?;
             self.text.clear_pipeline();
-            self.text
-                .update_textures(&self.render_pass, &self.swapchain, &self.context.device)?;
+            self.text.update_descriptors(
+                &self.render_pass,
+                &self.swapchain,
+                &self.context.device,
+            )?;
         }
         Ok(())
     }
@@ -546,7 +549,7 @@ impl Renderer {
         Ok(())
     }
 
-    fn update_command_buffer(&self, image_index: usize) -> RendererResult<()> {
+    fn update_command_buffer(&mut self, image_index: usize) -> RendererResult<()> {
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
         let cmd_buf = &self.command_buffers[image_index];
         let framebuffer = &self.swapchain.get_render_targets()[image_index].framebuffer;
@@ -610,6 +613,7 @@ impl Renderer {
     }
 
     fn submit_commands(&mut self, image_index: usize) -> RendererResult<()> {
+        self.update_command_buffer(image_index)?;
         let cmd_buf = &self.command_buffers[image_index];
         let this_frame_data = &self.frame_data[self.current_image];
         let semaphores_available = [this_frame_data.image_available_semaphore];
@@ -626,7 +630,6 @@ impl Renderer {
             self.context
                 .device
                 .reset_fences(&[this_frame_data.in_flight_fence])?;
-            self.update_command_buffer(image_index)?;
             if let Some(alloc) = &mut self.allocator {
                 for m in &mut self.models {
                     m.borrow_mut().update_instance_buffer(
@@ -666,16 +669,17 @@ impl Renderer {
 
         self.wait_for_image_fence_and_set_new_fence(image_index as usize)?;
 
-        self.submit_commands(image_index as usize)?;
-
-        self.present(image_index)?;
-        self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
         if let Some(allo) = &mut self.allocator {
             self.buffer_manager
                 .lock()
                 .unwrap()
-                .free_queued(allo);
+                .free_queued(allo, image_index);
         }
+
+        self.submit_commands(image_index as usize)?;
+
+        self.present(image_index)?;
+        self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
         Ok(())
     }
 
@@ -777,11 +781,11 @@ impl Renderer {
         position: (u32, u32),
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
-    ) -> RendererResult<usize> {
-        let letters = self.text.create_letters(styles, color);
-        let id = if let Some(allo) = &mut self.allocator {
-            let id = self.text.create_vertex_data(
-                letters,
+    ) -> RendererResult<Vec<usize>> {
+        if let Some(allo) = &mut self.allocator {
+            self.text.add_text(
+                styles,
+                color,
                 position,
                 window,
                 &self.context.device,
@@ -791,23 +795,15 @@ impl Renderer {
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
                 &self.swapchain,
-            )?;
-            self.text.update_vertex_buffer(
-                &self.context.device,
-                allo,
-                self.buffer_manager.clone(),
-            )?;
-            id
+            )
         } else {
             panic!("No allocator!");
-        };
-        Ok(id)
+        }
     }
 
     pub fn remove_text(&mut self, id: usize) -> RendererResult<()> {
         if let Some(allo) = &mut self.allocator {
-            self.text
-                .remove_text_by_id(&self.context, allo, self.buffer_manager.clone(), id)
+            self.text.remove_text_by_id(&self.context.device, allo, id)
         } else {
             panic!("No allocator!");
         }
@@ -1136,17 +1132,21 @@ impl Drop for Renderer {
             for m in &mut self.models {
                 let mut m = m.borrow_mut();
                 if let Some(vb) = &mut m.vertex_buffer {
-                    vb.queue_free().expect("Invalid Handle?!");
+                    vb.queue_free(None).expect("Invalid Handle?!");
                 }
                 if let Some(ib) = &mut m.index_buffer {
-                    ib.queue_free().expect("Invalid Handle?!");
+                    ib.queue_free(None).expect("Invalid Handle?!");
                 }
                 if let Some(ib) = &mut m.instance_buffer {
-                    ib.queue_free().expect("Invalid Handle?!");
+                    ib.queue_free(None).expect("Invalid Handle?!");
                 }
             }
-            self.uniform_buffer.queue_free().expect("Invalid Handle?!");
-            self.light_buffer.queue_free().expect("Invalid Handle?!");
+            self.uniform_buffer
+                .queue_free(None)
+                .expect("Invalid Handle?!");
+            self.light_buffer
+                .queue_free(None)
+                .expect("Invalid Handle?!");
             self.texture_storage
                 .clean_up(&self.context.device, &mut allocator);
 
@@ -1160,12 +1160,16 @@ impl Drop for Renderer {
             self.context
                 .device
                 .destroy_render_pass(self.render_pass, None);
+            let num_images = self.swapchain.get_actual_image_count();
             self.swapchain.destroy(&self.context, &mut allocator);
             self.shader_module.destroy();
-            self.buffer_manager
-                .lock()
-                .unwrap()
-                .free_queued(&mut allocator);
+
+            {
+                let mut guard = self.buffer_manager.lock().unwrap();
+                for i in 0..num_images {
+                    guard.free_queued(&mut allocator, i);
+                }
+            }
             drop(allocator); // Ensure all memory is freed
         }
         self.dropped = true;

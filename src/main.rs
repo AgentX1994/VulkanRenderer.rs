@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     )?;
     renderer.add_text(
         &window,
-        (100, 200),
+        (100, 300),
         &[
             &fontdue::layout::TextStyle::new("Hello ", 35.0, 0),
             &fontdue::layout::TextStyle::new("world!", 40.0, 0),
@@ -305,7 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let diff = 1.0 / now.duration_since(temp).unwrap_or_default().as_secs_f32();
             let text = format!("FPS: {:.02}", diff);
             renderer
-                .remove_text(fps_id)
+                .remove_text(fps_id[0])
                 .expect("Could not remove old fps text");
             fps_id = renderer
                 .add_text(

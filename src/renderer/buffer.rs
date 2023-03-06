@@ -123,7 +123,7 @@ impl InternalBuffer {
 #[derive(Debug)]
 pub struct BufferManager {
     handle_array: HandleArray<InternalBuffer>,
-    to_free: Vec<InternalBuffer>,
+    to_free: Vec<(InternalBuffer, Option<u32>)>,
 }
 
 impl BufferManager {
@@ -184,17 +184,21 @@ impl BufferManager {
             .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
-    pub fn queue_free(&mut self, handle: BufferHandle) -> RendererResult<()> {
+    pub fn queue_free(&mut self, handle: BufferHandle, last_frame_index: Option<u32>) -> RendererResult<()> {
         let int_buf = self.handle_array.remove(handle.0)?;
-        self.to_free.push(int_buf);
+        self.to_free.push((int_buf, last_frame_index));
         Ok(())
     }
 
-    pub fn free_queued(&mut self, allocator: &mut Allocator) {
-        for int_buf in &mut self.to_free {
-            int_buf.destroy(allocator);
-        }
-        self.to_free.clear();
+    pub fn free_queued(&mut self, allocator: &mut Allocator, last_frame_index: u32) {
+        self.to_free.retain_mut(|(int_buf, i)| {
+            if i.is_none() || i.unwrap() == last_frame_index {
+                int_buf.destroy(allocator);
+                false
+            } else {
+                true
+            }
+        });
     }
 }
 
@@ -249,11 +253,11 @@ impl Buffer {
             .unwrap()
     }
 
-    pub fn queue_free(&mut self) -> RendererResult<()> {
+    pub fn queue_free(&mut self, last_frame_index: Option<u32>) -> RendererResult<()> {
         if !self.active {
             panic!("Tried to free inactive buffer!");
         }
         self.active = false;
-        self.manager.lock().unwrap().queue_free(self.handle)
+        self.manager.lock().unwrap().queue_free(self.handle, last_frame_index)
     }
 }

@@ -70,7 +70,7 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Model<Vertex, Instanc
                     panic!("Invalid line in obj: {line}")
                 }
                 if args.len() == 4 {
-                    println!("Warning: w argument to v not supported.")
+                    // println!("Warning: w argument to v not supported.")
                 }
                 let x = args[0].parse::<f32>()?;
                 let y = args[1].parse::<f32>()?;
@@ -83,7 +83,7 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Model<Vertex, Instanc
                     panic!("Invalid line in obj: {line}")
                 }
                 if args.len() == 3 {
-                    println!("Warning: w argument to vt not supported.")
+                    // println!("Warning: w argument to vt not supported.")
                 }
                 let u = args[0].parse::<f32>()?;
                 let v = args[1].parse::<f32>()?;
@@ -235,7 +235,7 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Model<Vertex, Instanc
                 indices.push(index3);
             }
             _ => {
-                println!("Warning: Unsupported line in obj: {line}")
+                // println!("Warning: Unsupported line in obj: {line}")
             }
         }
     }
