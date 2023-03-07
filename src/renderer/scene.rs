@@ -51,7 +51,6 @@ impl SceneObject {
         if let Some(model) = &self.model {
             let instance_data = InstanceData::new(
                 self.global_transform,
-                glm::Vec3::new(0.0, 0.0, 0.0),
                 self.metallic,
                 self.roughness,
                 self.texture_id,

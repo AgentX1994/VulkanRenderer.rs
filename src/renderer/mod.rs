@@ -70,7 +70,6 @@ impl Drop for FrameData {
 pub struct InstanceData {
     pub model_matrix: [[f32; 4]; 4],
     pub inverse_model_matrix: [[f32; 4]; 4],
-    pub color: [f32; 3],
     pub metallic: f32,
     pub roughness: f32,
     pub texture_id: u32,
@@ -79,7 +78,6 @@ pub struct InstanceData {
 impl InstanceData {
     pub fn new(
         model: glm::Mat4,
-        color: glm::Vec3,
         metallic: f32,
         roughness: f32,
         texture_id: u32,
@@ -87,7 +85,6 @@ impl InstanceData {
         InstanceData {
             model_matrix: model.into(),
             inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
-            color: color.into(),
             metallic,
             roughness,
             texture_id,
