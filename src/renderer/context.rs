@@ -257,8 +257,12 @@ impl VulkanContext {
                         wayland_surface_loader.create_wayland_surface(&wayland_create_info, None)?
                     }
                 } else {
+                    #[cfg(not(target_os = "windows"))]
+                    let window = surface as u64;
+                    #[cfg(target_os = "windows")]
+                    let window = surface as u32;
                     let x11_create_info = vk::XlibSurfaceCreateInfoKHR::builder()
-                        .window(surface as u64)
+                        .window(window)
                         .dpy(display as *mut *const c_void);
                     let xlib_surface_loader =
                         ash::extensions::khr::XlibSurface::new(&entry, &instance);
