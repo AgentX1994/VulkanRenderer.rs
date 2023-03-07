@@ -22,6 +22,7 @@ pub struct VulkanContext {
     pub instance: Instance,
     pub physical_device: vk::PhysicalDevice,
     pub device: ash::Device,
+    pub max_texture_extent: vk::Extent3D, // TODO I think this should be queryable dynamically
     pub surface: vk::SurfaceKHR,
     pub surface_loader: khr::Surface,
     pub surface_capabilities: vk::SurfaceCapabilitiesKHR,
@@ -306,10 +307,23 @@ impl VulkanContext {
             surface_loader.get_physical_device_surface_formats(physical_device, surface)?
         };
 
+        // TODO this is only for the text atlas textures
+        let limits = unsafe {
+            instance.get_physical_device_image_format_properties(
+                physical_device,
+                vk::Format::R8_SRGB,
+                vk::ImageType::TYPE_2D,
+                vk::ImageTiling::OPTIMAL,
+                vk::ImageUsageFlags::SAMPLED,
+                vk::ImageCreateFlags::empty(),
+            )?
+        };
+
         Ok(Self {
             _entry: entry,
             instance,
             physical_device,
+            max_texture_extent: limits.max_extent,
             device,
             surface,
             surface_loader,

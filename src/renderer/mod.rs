@@ -788,6 +788,7 @@ impl Renderer {
                 color,
                 position,
                 window,
+                &self.context.max_texture_extent,
                 &self.context.device,
                 allo,
                 self.buffer_manager.clone(),

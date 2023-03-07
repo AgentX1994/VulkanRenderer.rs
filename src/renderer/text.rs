@@ -21,6 +21,8 @@ use super::swapchain::Swapchain;
 use super::RendererResult;
 
 struct CharacterData {
+    cur_x: usize,
+    cur_y: usize,
     _advance_width: f32,
     _advance_height: f32,
     width: usize,
@@ -28,6 +30,7 @@ struct CharacterData {
     _left: f32,
     _top: f32,
     texture_x: f32,
+    texture_y: f32,
 }
 
 struct TextAtlasTexture {
@@ -69,7 +72,10 @@ impl TextAtlasTexture {
 
         //  allocate memory for image
         let reqs = unsafe { device.get_image_memory_requirements(image) };
-        println!("Creating Texture atlas of size {}x{}, {} bytes", width, height, reqs.size);
+        println!(
+            "Creating Texture atlas of size {}x{}, {} bytes",
+            width, height, reqs.size
+        );
         let allocation = allocator.allocate(&AllocationCreateDesc {
             name: "text texture",
             requirements: reqs,
@@ -336,7 +342,9 @@ impl TextBuffer {
     }
 
     fn destroy(&mut self) {
-        self.vertex_buffer.queue_free(self.last_image_index).expect("Invalid Buffer!?");
+        self.vertex_buffer
+            .queue_free(self.last_image_index)
+            .expect("Invalid Buffer!?");
     }
 }
 
@@ -379,6 +387,7 @@ impl TextHandler {
     fn generate_texture_atlas(
         &mut self,
         px: f32,
+        max_extent: &vk::Extent3D,
         device: &Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
@@ -386,40 +395,68 @@ impl TextHandler {
         queue: &vk::Queue,
     ) -> RendererResult<TextAtlasTexture> {
         let mut char_data = HashMap::new();
-        let mut width: usize = 0;
-        let mut height: usize = 0;
-        for (_c, i) in self.font.chars() {
-            let metrics = self.font.metrics_indexed((*i).into(), px);
-            width += metrics.width;
-            height = std::cmp::max(height, metrics.height);
-        }
-        let mut data = vec![0; width * height];
+        let mut width = max_extent.width as usize;
+        let mut height = max_extent.height as usize;
+        let mut char_list_with_metrics: Vec<_> = self
+            .font
+            .chars()
+            .iter()
+            .map(|(c, i)| {
+                let metrics = self.font.metrics_indexed((*i).into(), px);
+                (*c, *i, metrics)
+            })
+            .collect();
+
+        char_list_with_metrics.sort_by(|(_c_l, _i_l, metrics_l), (_c_r, _i_r, metrics_r)| {
+            metrics_r.height.cmp(&metrics_l.height)
+        });
 
         let mut cur_x = 0usize;
-        for (_c, i) in self.font.chars() {
-            let (metrics, glyph_data) = self.font.rasterize_indexed((*i).into(), px);
+        let mut cur_y = 0usize;
+        let mut tallest_this_row = 0usize;
+        let mut max_width = 0usize;
+        let mut max_height = 0usize;
+        for (_c, i, metrics) in char_list_with_metrics.iter() {
+            if cur_x + metrics.width > width {
+                cur_x = 0;
+                cur_y += tallest_this_row;
+                tallest_this_row = metrics.height;
+            }
             let character_data = CharacterData {
+                cur_x,
+                cur_y,
                 _advance_width: metrics.advance_width,
                 _advance_height: metrics.advance_height,
                 width: metrics.width,
                 height: metrics.height,
                 _left: metrics.bounds.xmin,
                 _top: metrics.bounds.ymin,
-                texture_x: cur_x as f32 / width as f32,
+                texture_x: 0f32, // These are calculated after we determine the max extent of the atlas
+                texture_y: 0f32, // These are calculated after we determine the max extent of the atlas
             };
             char_data.insert((*i).into(), character_data);
+            cur_x += metrics.width;
+            tallest_this_row = std::cmp::max(tallest_this_row, metrics.height);
+            max_width = std::cmp::max(max_width, cur_x);
+            max_height = std::cmp::max(max_height, cur_y + metrics.height);
+        }
+
+        let mut data = vec![0; max_width * max_height];
+        for (i, character_data) in char_data.iter_mut() {
+            let (metrics, glyph_data) = self.font.rasterize_indexed(*i, px);
+            character_data.texture_x = character_data.cur_x as f32 / max_width as f32;
+            character_data.texture_y = character_data.cur_y as f32 / max_width as f32;
             for y in 0..metrics.height {
                 for x in 0..metrics.width {
-                    data[cur_x + x + y * width] = glyph_data[x + y * metrics.width];
+                    data[character_data.cur_x + x + (character_data.cur_y + y) * max_width] = glyph_data[x + y * metrics.width];
                 }
             }
-            cur_x += metrics.width;
         }
 
         let atlas = TextAtlasTexture::from_u8s(
             &data,
-            width as u32,
-            height as u32,
+            max_width as u32,
+            max_height as u32,
             char_data,
             device,
             allocator,
@@ -435,6 +472,7 @@ impl TextHandler {
         &mut self,
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
+        max_extent: &vk::Extent3D,
         device: &Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
@@ -458,6 +496,7 @@ impl TextHandler {
             {
                 let atlas = self.generate_texture_atlas(
                     style.px,
+                    max_extent,
                     device,
                     allocator,
                     buffer_manager.clone(),
@@ -484,6 +523,7 @@ impl TextHandler {
         color: [f32; 3],
         position: (u32, u32), // in pixels
         window: &winit::window::Window,
+        max_extent: &vk::Extent3D,
         device: &Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
@@ -495,6 +535,7 @@ impl TextHandler {
         let (letters, atlas_added) = self.create_letters(
             styles,
             color,
+            max_extent,
             device,
             allocator,
             buffer_manager.clone(),
@@ -532,13 +573,10 @@ impl TextHandler {
                 println!("Could not find char data for glyph?");
                 continue;
             };
-            let left = 2.0 * (l.position_and_shape.x + position.0 as f32)
-                / screen_size.width as f32
-                - 1.0;
+            let left =
+                2.0 * (l.position_and_shape.x + position.0 as f32) / screen_size.width as f32 - 1.0;
             let right = 2.0
-                * (l.position_and_shape.x
-                    + position.0 as f32
-                    + l.position_and_shape.width as f32)
+                * (l.position_and_shape.x + position.0 as f32 + l.position_and_shape.width as f32)
                 / screen_size.width as f32
                 - 1.0;
             let top = 2.0
@@ -550,7 +588,7 @@ impl TextHandler {
                 / screen_size.height as f32
                 - 1.0;
             let start_u = char_data.texture_x;
-            let start_v = 0f32;
+            let start_v = char_data.texture_y;
             let end_u = start_u + char_data.width as f32 / atlas.width;
             let end_v = start_v + char_data.height as f32 / atlas.height;
             let v1 = TextVertexData {
@@ -658,7 +696,7 @@ impl TextHandler {
                 * swapchain.get_actual_image_count(),
         }];
         let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count()*self.atlases.len() as u32)
+            .max_sets(swapchain.get_actual_image_count() * self.atlases.len() as u32)
             .pool_sizes(&pool_sizes);
         let descriptor_pool =
             unsafe { device.create_descriptor_pool(&descriptor_pool_info, None) }?;
@@ -693,7 +731,8 @@ impl TextHandler {
                     device.update_descriptor_sets(&[descriptor_write_image], &[]);
                 }
             }
-            self.descriptor_sets.insert(*px as u32, descriptor_sets_text);
+            self.descriptor_sets
+                .insert(*px as u32, descriptor_sets_text);
         }
         Ok(())
     }
@@ -709,7 +748,9 @@ impl TextHandler {
             }
             for text_buffer in self.vertex_data.values_mut() {
                 unsafe {
-                    let descriptor_set = if let Some(desc_set_vec) = self.descriptor_sets.get(&(text_buffer.px as u32)) {
+                    let descriptor_set = if let Some(desc_set_vec) =
+                        self.descriptor_sets.get(&(text_buffer.px as u32))
+                    {
                         desc_set_vec[index]
                     } else {
                         panic!("Could not get descriptor set for px");
@@ -751,7 +792,10 @@ impl TextHandler {
             }
         }
         for text_buffer in self.vertex_data.values_mut() {
-            text_buffer.vertex_buffer.queue_free(text_buffer.last_image_index).expect("Could not queue buffer for free");
+            text_buffer
+                .vertex_buffer
+                .queue_free(text_buffer.last_image_index)
+                .expect("Could not queue buffer for free");
         }
         self.vertex_data.clear();
         for (_px, mut atlas) in self.atlases.drain(0..self.atlases.len()) {
