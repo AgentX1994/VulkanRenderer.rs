@@ -445,7 +445,7 @@ impl TextHandler {
         for (i, character_data) in char_data.iter_mut() {
             let (metrics, glyph_data) = self.font.rasterize_indexed(*i, px);
             character_data.texture_x = character_data.cur_x as f32 / max_width as f32;
-            character_data.texture_y = character_data.cur_y as f32 / max_width as f32;
+            character_data.texture_y = character_data.cur_y as f32 / max_height as f32;
             for y in 0..metrics.height {
                 for x in 0..metrics.width {
                     data[character_data.cur_x + x + (character_data.cur_y + y) * max_width] = glyph_data[x + y * metrics.width];
