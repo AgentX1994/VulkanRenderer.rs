@@ -136,6 +136,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut camera = Camera::builder().build();
 
+    let mut speed_factor = 1.0f32;
     let mut move_up_pressed = false;
     let mut move_down_pressed = false;
     let mut move_forward_pressed = false;
@@ -280,6 +281,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     winit::event::ElementState::Released => false,
                 };
             }
+            winit::event::VirtualKeyCode::LShift => {
+                speed_factor = match pressed {
+                    winit::event::ElementState::Pressed => 2.0f32,
+                    winit::event::ElementState::Released => 1.0f32,
+                };
+            }
             winit::event::VirtualKeyCode::F12 => {
                 if matches!(pressed, winit::event::ElementState::Pressed) {
                     renderer.screenshot().expect("Could not take screenshot");
@@ -315,37 +322,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     [1.0, 1.0, 1.0],
                 )
                 .expect("Could not add fps text");
-            const MOVE_SPEED: f32 = 0.05f32;
-            const TURN_SPEED: f32 = 0.005f32;
+            let move_speed: f32 = 0.05f32 * speed_factor;
+            let turn_speed: f32 = 0.005f32 * speed_factor;
             if move_up_pressed {
-                camera.move_up(MOVE_SPEED);
+                camera.move_up(move_speed);
             }
             if move_down_pressed {
-                camera.move_down(MOVE_SPEED);
+                camera.move_down(move_speed);
             }
             if move_forward_pressed {
-                camera.move_forward(MOVE_SPEED);
+                camera.move_forward(move_speed);
             }
             if move_backward_pressed {
-                camera.move_backward(MOVE_SPEED);
+                camera.move_backward(move_speed);
             }
             if move_right_pressed {
-                camera.move_right(MOVE_SPEED);
+                camera.move_right(move_speed);
             }
             if move_left_pressed {
-                camera.move_left(MOVE_SPEED);
+                camera.move_left(move_speed);
             }
             if turn_up_pressed {
-                camera.turn_up(TURN_SPEED);
+                camera.turn_up(turn_speed);
             }
             if turn_down_pressed {
-                camera.turn_down(TURN_SPEED);
+                camera.turn_down(turn_speed);
             }
             if turn_right_pressed {
-                camera.turn_right(TURN_SPEED);
+                camera.turn_right(turn_speed);
             }
             if turn_left_pressed {
-                camera.turn_left(TURN_SPEED);
+                camera.turn_left(turn_speed);
             }
             renderer
                 .update_uniforms_from_camera(&camera)
