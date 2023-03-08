@@ -14,8 +14,8 @@ use super::buffer::Buffer;
 use super::buffer::BufferManager;
 use super::error::InvalidHandle;
 use super::error::RendererError;
+use super::material::MaterialStorage;
 use super::pipeline::GraphicsPipeline;
-use super::shader_module::ShaderModule;
 use super::swapchain::Swapchain;
 use super::RendererResult;
 
@@ -351,24 +351,13 @@ pub struct TextHandler {
     vertex_data: HashMap<usize, TextBuffer>,
     font: fontdue::Font,
     atlases: Vec<(f32, TextAtlasTexture)>,
-    pipeline: Option<GraphicsPipeline>,
-    shader_module: ShaderModule,
     descriptor_pool: Option<vk::DescriptorPool>,
     // TODO deal with the fact that px is f32
     descriptor_sets: HashMap<u32, Vec<vk::DescriptorSet>>,
 }
 
 impl TextHandler {
-    pub fn new<P: AsRef<std::path::Path>>(
-        device: &Device,
-        font_path: P,
-    ) -> RendererResult<TextHandler> {
-        let shader_module = ShaderModule::new(
-            device,
-            vk_shader_macros::include_glsl!("./shaders/text.vert", kind: vert),
-            vk_shader_macros::include_glsl!("./shaders/text.frag", kind: frag),
-        )?;
-
+    pub fn new<P: AsRef<std::path::Path>>(font_path: P) -> RendererResult<TextHandler> {
         let font_data = std::fs::read(font_path)?;
         let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
 
@@ -376,8 +365,6 @@ impl TextHandler {
             vertex_data: HashMap::new(),
             font,
             atlases: vec![],
-            shader_module,
-            pipeline: None,
             descriptor_pool: None,
             descriptor_sets: HashMap::new(),
         })
@@ -521,10 +508,10 @@ impl TextHandler {
         device: &Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
-        render_pass: &vk::RenderPass,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
         swapchain: &Swapchain,
+        material_storage: &MaterialStorage,
     ) -> RendererResult<Vec<usize>> {
         let (letters, atlas_added) = self.create_letters(
             styles,
@@ -616,22 +603,18 @@ impl TextHandler {
             }
         }
         let id: usize = rand::random();
-        let text_buffer =
-            TextBuffer::new(px, vertex_data, device, allocator, buffer_manager)?;
+        let text_buffer = TextBuffer::new(px, vertex_data, device, allocator, buffer_manager)?;
         self.vertex_data.insert(id, text_buffer);
         ret_ids.push(id);
         if atlas_added {
-            self.update_descriptors(render_pass, swapchain, device)?;
+            self.update_descriptors(swapchain, device, material_storage)?;
         }
         Ok(ret_ids)
     }
 
-    pub fn remove_text_by_id(
-        &mut self,
-        id: usize,
-    ) -> RendererResult<()> {
+    pub fn remove_text_by_id(&mut self, id: usize) -> RendererResult<()> {
         // TODO Remove the texture atlas too? How?
-        
+
         if let Some(mut vert_data) = self.vertex_data.remove(&id) {
             vert_data.destroy();
             Ok(())
@@ -642,20 +625,14 @@ impl TextHandler {
 
     pub fn update_descriptors(
         &mut self,
-        render_pass: &vk::RenderPass,
         swapchain: &Swapchain,
         device: &Device,
+        material_storage: &MaterialStorage,
     ) -> RendererResult<()> {
-        if self.pipeline.is_none() {
-            self.pipeline = Some(GraphicsPipeline::new_text(
-                device,
-                swapchain.get_extent(),
-                render_pass,
-                self.shader_module.get_stages(),
-                &TextVertexData::get_vertex_attributes(),
-                &TextVertexData::get_vertex_bindings(),
-            )?);
-        }
+        let material = material_storage
+            .get_material("text")
+            .expect("No \"text\" material!");
+        let pipeline = &material.pipeline;
         if let Some(pool) = self.descriptor_pool {
             unsafe {
                 device.destroy_descriptor_pool(pool, None);
@@ -675,7 +652,7 @@ impl TextHandler {
 
         let desc_layouts_text = vec![
             // This pipeline has to exist, so we know this will succeed
-            self.pipeline.as_ref().unwrap().descriptor_set_layouts[0];
+            pipeline.descriptor_set_layouts[0];
             swapchain.get_actual_image_count() as usize
         ];
         let descriptor_set_allocate_info_text = vk::DescriptorSetAllocateInfo::builder()
@@ -708,55 +685,68 @@ impl TextHandler {
         Ok(())
     }
 
-    pub fn draw(&mut self, device: &Device, cmd_buf: vk::CommandBuffer, index: usize) {
-        if let Some(pipeline) = &self.pipeline {
+    pub fn draw(
+        &mut self,
+        device: &Device,
+        cmd_buf: vk::CommandBuffer,
+        index: usize,
+        extent: vk::Extent2D,
+        material_storage: &MaterialStorage,
+    ) {
+        let material = material_storage
+            .get_material("text")
+            .expect("No \"text\" material!");
+        let pipeline = &material.pipeline;
+        unsafe {
+            device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline);
+            let viewports = [vk::Viewport {
+                x: 0.,
+                y: 0.,
+                width: extent.width as f32,
+                height: extent.height as f32,
+                min_depth: 0.,
+                max_depth: 1.,
+            }];
+            let scissors = [vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent,
+            }];
+
+            device.cmd_set_viewport(cmd_buf, 0, &viewports);
+            device.cmd_set_scissor(cmd_buf, 0, &scissors);
+        }
+        for text_buffer in self.vertex_data.values_mut() {
             unsafe {
-                device.cmd_bind_pipeline(
+                let descriptor_set = if let Some(desc_set_vec) =
+                    self.descriptor_sets.get(&(text_buffer.px as u32))
+                {
+                    desc_set_vec[index]
+                } else {
+                    panic!("Could not get descriptor set for px");
+                };
+                device.cmd_bind_descriptor_sets(
                     cmd_buf,
                     vk::PipelineBindPoint::GRAPHICS,
-                    pipeline.pipeline,
+                    pipeline.pipeline_layout,
+                    0,
+                    &[descriptor_set],
+                    &[],
                 );
+                let int_buf = text_buffer.vertex_buffer.get_buffer();
+                device.cmd_bind_vertex_buffers(cmd_buf, 0, &[int_buf.buffer], &[0]);
+                device.cmd_draw(
+                    cmd_buf,
+                    text_buffer.vertex_data.len() as u32,
+                    1, // instance count
+                    0,
+                    0,
+                );
+                text_buffer.last_image_index = Some(index as u32);
             }
-            for text_buffer in self.vertex_data.values_mut() {
-                unsafe {
-                    let descriptor_set = if let Some(desc_set_vec) =
-                        self.descriptor_sets.get(&(text_buffer.px as u32))
-                    {
-                        desc_set_vec[index]
-                    } else {
-                        panic!("Could not get descriptor set for px");
-                    };
-                    device.cmd_bind_descriptor_sets(
-                        cmd_buf,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline.pipeline_layout,
-                        0,
-                        &[descriptor_set],
-                        &[],
-                    );
-                    let int_buf = text_buffer.vertex_buffer.get_buffer();
-                    device.cmd_bind_vertex_buffers(cmd_buf, 0, &[int_buf.buffer], &[0]);
-                    device.cmd_draw(
-                        cmd_buf,
-                        text_buffer.vertex_data.len() as u32,
-                        1, // instance count
-                        0,
-                        0,
-                    );
-                    text_buffer.last_image_index = Some(index as u32);
-                }
-            }
-        }
-    }
-
-    pub fn clear_pipeline(&mut self) {
-        if let Some(mut pip) = self.pipeline.take() {
-            pip.destroy();
         }
     }
 
     pub fn destroy(&mut self, device: &Device, allocator: &mut Allocator) {
-        self.clear_pipeline();
         if let Some(pool) = self.descriptor_pool.take() {
             unsafe {
                 device.destroy_descriptor_pool(pool, None);
@@ -772,6 +762,5 @@ impl TextHandler {
         for (_px, mut atlas) in self.atlases.drain(0..self.atlases.len()) {
             atlas.destroy(device, allocator);
         }
-        self.shader_module.destroy();
     }
 }

@@ -15,6 +15,7 @@ pub mod camera;
 mod context;
 pub mod error;
 pub mod light;
+mod material;
 pub mod model;
 mod pipeline;
 mod queue;
@@ -31,13 +32,13 @@ use buffer::Buffer;
 use camera::Camera;
 use model::Model;
 use pipeline::GraphicsPipeline;
-use shader_module::ShaderModule;
 use swapchain::Swapchain;
 use vertex::Vertex;
 
 use self::buffer::BufferManager;
 use self::context::VulkanContext;
 use self::light::LightManager;
+use self::material::MaterialStorage;
 use self::text::TextHandler;
 use self::texture::TextureStorage;
 use self::utils::InternalWindow;
@@ -76,12 +77,7 @@ pub struct InstanceData {
 }
 
 impl InstanceData {
-    pub fn new(
-        model: glm::Mat4,
-        metallic: f32,
-        roughness: f32,
-        texture_id: u32,
-    ) -> Self {
+    pub fn new(model: glm::Mat4, metallic: f32, roughness: f32, texture_id: u32) -> Self {
         InstanceData {
             model_matrix: model.into(),
             inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
@@ -99,8 +95,7 @@ pub struct Renderer {
     pub buffer_manager: Arc<Mutex<BufferManager>>,
     swapchain: Swapchain,
     render_pass: vk::RenderPass,
-    shader_module: ShaderModule,
-    graphics_pipeline: GraphicsPipeline,
+    material_storage: MaterialStorage,
     graphics_command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_data: Vec<FrameData>,
@@ -331,20 +326,7 @@ impl Renderer {
             &render_pass,
         )?;
 
-        let shader_module = ShaderModule::new(
-            &context.device,
-            vk_shader_macros::include_glsl!("./shaders/default.vert", kind: vert),
-            vk_shader_macros::include_glsl!("./shaders/default.frag", kind: frag),
-        )?;
-        let graphics_pipeline = GraphicsPipeline::new(
-            &context.device,
-            swapchain.get_extent(),
-            &render_pass,
-            shader_module.get_stages(),
-            &Vertex::get_attribute_descriptions(),
-            &Vertex::get_binding_description(),
-            0,
-        )?;
+        let material_storage = MaterialStorage::new(&context.device, render_pass)?;
 
         // Create command pools
         let graphics_commandpool_info = vk::CommandPoolCreateInfo::builder()
@@ -421,10 +403,13 @@ impl Renderer {
                 .create_descriptor_pool(&descriptor_pool_info, None)?
         };
 
+        let material = material_storage
+            .get_material("default")
+            .expect("No \"default\" material");
         let (descriptor_sets_camera, descriptor_sets_lights, descriptor_sets_texture) =
             Self::create_descriptor_sets(
                 &context.device,
-                &graphics_pipeline,
+                &material.pipeline,
                 &descriptor_pool,
                 &swapchain,
                 &uniform_buffer,
@@ -432,7 +417,7 @@ impl Renderer {
                 0,
             )?;
 
-        let text = TextHandler::new(&context.device, "Roboto-Regular.ttf")?;
+        let text = TextHandler::new("Roboto-Regular.ttf")?;
 
         Ok(Renderer {
             dropped: false,
@@ -443,8 +428,7 @@ impl Renderer {
             graphics_command_pool,
             command_buffers,
             render_pass,
-            shader_module,
-            graphics_pipeline,
+            material_storage,
             frame_data,
             images_in_flight,
             current_image: 0,
@@ -476,16 +460,6 @@ impl Renderer {
                 height,
                 &self.render_pass,
             )?;
-            self.graphics_pipeline.destroy();
-            self.graphics_pipeline = GraphicsPipeline::new(
-                &self.context.device,
-                self.swapchain.get_extent(),
-                &self.render_pass,
-                self.shader_module.get_stages(),
-                &Vertex::get_attribute_descriptions(),
-                &Vertex::get_binding_description(),
-                self.number_of_textures,
-            )?;
             unsafe {
                 self.context
                     .device
@@ -497,9 +471,13 @@ impl Renderer {
                     .device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)?;
             }
+            let material = self
+                .material_storage
+                .get_material("default")
+                .expect("No \"default\" material");
             let (a, b, c) = Self::create_descriptor_sets(
                 &self.context.device,
-                &self.graphics_pipeline,
+                &material.pipeline,
                 &self.descriptor_pool,
                 &self.swapchain,
                 &self.uniform_buffer,
@@ -510,11 +488,10 @@ impl Renderer {
             self.descriptor_sets_lights = b;
             self.descriptor_sets_texture = c;
             self.update_textures()?;
-            self.text.clear_pipeline();
             self.text.update_descriptors(
-                &self.render_pass,
                 &self.swapchain,
                 &self.context.device,
+                &self.material_storage,
             )?;
         }
         Ok(())
@@ -582,15 +559,38 @@ impl Renderer {
                 &render_pass_begin_info,
                 vk::SubpassContents::INLINE,
             );
+            let material = self
+                .material_storage
+                .get_material("default")
+                .expect("No \"default\" material");
             self.context.device.cmd_bind_pipeline(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.graphics_pipeline.pipeline,
+                material.pipeline.pipeline,
             );
+
+            let viewports = [vk::Viewport {
+                x: 0.,
+                y: 0.,
+                width: self.swapchain.get_extent().width as f32,
+                height: self.swapchain.get_extent().height as f32,
+                min_depth: 0.,
+                max_depth: 1.,
+            }];
+            let scissors = [vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: self.swapchain.get_extent(),
+            }];
+
+            self.context
+                .device
+                .cmd_set_viewport(*cmd_buf, 0, &viewports);
+            self.context.device.cmd_set_scissor(*cmd_buf, 0, &scissors);
+
             self.context.device.cmd_bind_descriptor_sets(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                self.graphics_pipeline.pipeline_layout,
+                material.pipeline.pipeline_layout,
                 0,
                 &[
                     self.descriptor_sets_camera[image_index],
@@ -602,7 +602,13 @@ impl Renderer {
             for m in &self.models {
                 m.borrow().draw(&self.context.device, *cmd_buf);
             }
-            self.text.draw(&self.context.device, *cmd_buf, image_index);
+            self.text.draw(
+                &self.context.device,
+                *cmd_buf,
+                image_index,
+                self.swapchain.get_extent(),
+                &self.material_storage,
+            );
             self.context.device.cmd_end_render_pass(*cmd_buf);
             self.context.device.end_command_buffer(*cmd_buf)?;
         }
@@ -719,23 +725,17 @@ impl Renderer {
     pub fn update_textures(&mut self) -> RendererResult<()> {
         let num_texs = self.texture_storage.get_number_of_textures() as u32;
         if self.number_of_textures < num_texs {
-            self.graphics_pipeline.destroy();
-            self.graphics_pipeline = GraphicsPipeline::new(
-                &self.context.device,
-                self.swapchain.get_extent(),
-                &self.render_pass,
-                self.shader_module.get_stages(),
-                &Vertex::get_attribute_descriptions(),
-                &Vertex::get_binding_description(),
-                num_texs,
-            )?;
+            let material = self
+                .material_storage
+                .get_material("default")
+                .expect("No \"default\" material");
             unsafe {
                 self.context
                     .device
                     .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)
             }?;
             let descriptor_layouts_texture = vec![
-                self.graphics_pipeline.descriptor_set_layouts[2];
+                material.pipeline.descriptor_set_layouts[2];
                 self.swapchain.get_actual_image_count() as usize
             ];
             let descriptor_counts_texture =
@@ -789,10 +789,10 @@ impl Renderer {
                 &self.context.device,
                 allo,
                 self.buffer_manager.clone(),
-                &self.render_pass,
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
                 &self.swapchain,
+                &self.material_storage,
             )
         } else {
             panic!("No allocator!");
@@ -1149,14 +1149,13 @@ impl Drop for Renderer {
                 .device
                 .destroy_command_pool(self.graphics_command_pool, None);
             // device.destroy_command_pool(command_pool_transfer, None);
-            self.graphics_pipeline.destroy();
             self.text.destroy(&self.context.device, &mut allocator);
             self.context
                 .device
                 .destroy_render_pass(self.render_pass, None);
             let num_images = self.swapchain.get_actual_image_count();
+            self.material_storage.destroy();
             self.swapchain.destroy(&self.context, &mut allocator);
-            self.shader_module.destroy();
 
             {
                 let mut guard = self.buffer_manager.lock().unwrap();

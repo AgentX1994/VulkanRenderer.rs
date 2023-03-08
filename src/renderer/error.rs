@@ -28,7 +28,8 @@ pub enum RendererError {
     IoError(io::Error),
     FontError(&'static str),
     FloatParseError(ParseFloatError),
-    IntParseError(ParseIntError)
+    IntParseError(ParseIntError),
+    SpirvError(&'static str)
 }
 
 impl fmt::Display for RendererError {
@@ -42,6 +43,7 @@ impl fmt::Display for RendererError {
             RendererError::FontError(ref e) => e.fmt(f),
             RendererError::FloatParseError(ref e) => e.fmt(f),
             RendererError::IntParseError(ref e) => e.fmt(f),
+            RendererError::SpirvError(ref e) => e.fmt(f),
         }
     }
 }
@@ -57,6 +59,7 @@ impl error::Error for RendererError {
             RendererError::FontError(_) => None, // Why fontdue???
             RendererError::FloatParseError(ref e) => Some(e),
             RendererError::IntParseError(ref e) => Some(e),
+            RendererError::SpirvError(_) => None, // Why spirv_reflect???
         }
     }
 }

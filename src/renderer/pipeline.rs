@@ -15,7 +15,6 @@ impl GraphicsPipeline {
 
     pub fn new(
         device: &Device,
-        extent: vk::Extent2D,
         render_pass: &vk::RenderPass,
         shader_stages: &[vk::PipelineShaderStageCreateInfo],
         vertex_attrib_descs: &[vk::VertexInputAttributeDescription],
@@ -30,17 +29,21 @@ impl GraphicsPipeline {
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
+        // These will be set dynamically
         let viewports = [vk::Viewport {
             x: 0.,
             y: 0.,
-            width: extent.width as f32,
-            height: extent.height as f32,
+            width: 0.,
+            height: 0.,
             min_depth: 0.,
             max_depth: 1.,
         }];
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
-            extent,
+            extent: vk::Extent2D {
+                width: 0,
+                height: 0,
+            },
         }];
 
         let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
@@ -143,6 +146,9 @@ impl GraphicsPipeline {
         let pipeline_layout =
             unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
+        let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::builder()
+            .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
+
         let pipeline_info = vk::GraphicsPipelineCreateInfo::builder()
             .stages(shader_stages)
             .vertex_input_state(&vertex_input_info)
@@ -154,6 +160,7 @@ impl GraphicsPipeline {
             .color_blend_state(&color_blend_info)
             .layout(pipeline_layout)
             .render_pass(*render_pass)
+            .dynamic_state(&dynamic_state_create_info)
             .subpass(0);
 
         let graphics_pipeline = unsafe {
@@ -179,7 +186,6 @@ impl GraphicsPipeline {
 
     pub fn new_text(
         device: &Device,
-        extent: vk::Extent2D,
         render_pass: &vk::RenderPass,
         shader_stages: &[vk::PipelineShaderStageCreateInfo],
         vertex_attrib_descs: &[vk::VertexInputAttributeDescription],
@@ -192,17 +198,21 @@ impl GraphicsPipeline {
         let input_assembly_info = vk::PipelineInputAssemblyStateCreateInfo::builder()
             .topology(vk::PrimitiveTopology::TRIANGLE_LIST);
 
+        // These will be set dynamically
         let viewports = [vk::Viewport {
             x: 0.,
             y: 0.,
-            width: extent.width as f32,
-            height: extent.height as f32,
+            width: 0.,
+            height: 0.,
             min_depth: 0.,
             max_depth: 1.,
         }];
         let scissors = [vk::Rect2D {
             offset: vk::Offset2D { x: 0, y: 0 },
-            extent,
+            extent: vk::Extent2D {
+                width: 0,
+                height: 0,
+            },
         }];
 
         let viewport_info = vk::PipelineViewportStateCreateInfo::builder()
@@ -264,6 +274,9 @@ impl GraphicsPipeline {
         let pipeline_layout =
             unsafe { device.create_pipeline_layout(&pipeline_layout_info, None)? };
 
+        let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::builder()
+            .dynamic_states(&[vk::DynamicState::SCISSOR, vk::DynamicState::VIEWPORT]);
+
         let pipeline_info = vk::GraphicsPipelineCreateInfo::builder()
             .stages(shader_stages)
             .vertex_input_state(&vertex_input_info)
@@ -275,6 +288,7 @@ impl GraphicsPipeline {
             .color_blend_state(&color_blend_info)
             .layout(pipeline_layout)
             .render_pass(*render_pass)
+            .dynamic_state(&dynamic_state_create_info)
             .subpass(0);
 
         let graphics_pipeline = unsafe {
