@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -395,8 +394,7 @@ impl TextHandler {
         queue: &vk::Queue,
     ) -> RendererResult<TextAtlasTexture> {
         let mut char_data = HashMap::new();
-        let mut width = max_extent.width as usize;
-        let mut height = max_extent.height as usize;
+        let max_texture_width = max_extent.width as usize;
         let mut char_list_with_metrics: Vec<_> = self
             .font
             .chars()
@@ -417,7 +415,7 @@ impl TextHandler {
         let mut max_width = 0usize;
         let mut max_height = 0usize;
         for (_c, i, metrics) in char_list_with_metrics.iter() {
-            if cur_x + metrics.width > width {
+            if cur_x + metrics.width > max_texture_width {
                 cur_x = 0;
                 cur_y += tallest_this_row;
                 tallest_this_row = metrics.height;
@@ -448,7 +446,8 @@ impl TextHandler {
             character_data.texture_y = character_data.cur_y as f32 / max_height as f32;
             for y in 0..metrics.height {
                 for x in 0..metrics.width {
-                    data[character_data.cur_x + x + (character_data.cur_y + y) * max_width] = glyph_data[x + y * metrics.width];
+                    data[character_data.cur_x + x + (character_data.cur_y + y) * max_width] =
+                        glyph_data[x + y * metrics.width];
                 }
             }
         }
@@ -488,12 +487,7 @@ impl TextHandler {
         layout.reset(&settings);
         for style in styles {
             layout.append(&[&self.font], style);
-            if self
-                .atlases
-                .iter()
-                .find(|(px, _)| *px == style.px)
-                .is_none()
-            {
+            if !self.atlases.iter().any(|(px, _)| *px == style.px) {
                 let atlas = self.generate_texture_atlas(
                     style.px,
                     max_extent,
@@ -623,7 +617,7 @@ impl TextHandler {
         }
         let id: usize = rand::random();
         let text_buffer =
-            TextBuffer::new(px, vertex_data, device, allocator, buffer_manager.clone())?;
+            TextBuffer::new(px, vertex_data, device, allocator, buffer_manager)?;
         self.vertex_data.insert(id, text_buffer);
         ret_ids.push(id);
         if atlas_added {
@@ -634,35 +628,12 @@ impl TextHandler {
 
     pub fn remove_text_by_id(
         &mut self,
-        device: &Device,
-        allocator: &mut Allocator,
         id: usize,
     ) -> RendererResult<()> {
-        // TODO deal with the fact px is f32
-        // let old_set = self
-        //     .vertex_data
-        //     .values()
-        //     .map(|buf| buf.px as u64)
-        //     .collect::<HashSet<u64>>();
+        // TODO Remove the texture atlas too? How?
+        
         if let Some(mut vert_data) = self.vertex_data.remove(&id) {
             vert_data.destroy();
-            // let new_set = self
-            //     .vertex_data
-            //     .values()
-            //     .map(|buf| buf.px as u64)
-            //     .collect::<HashSet<u64>>();
-            // let removed_pxs = old_set
-            //     .difference(&new_set)
-            //     .map(|x| *x)
-            //     .collect::<HashSet<u64>>();
-            // for (atlas_px, atlas) in self.atlases.iter_mut() {
-            //     if removed_pxs.contains(&(*atlas_px as u64)) {
-            //         atlas.destroy(device, allocator);
-            //     }
-            // }
-            // self.atlases
-            //     .retain(|(atlas_px, _atlas)| !removed_pxs.contains(&(*atlas_px as u64)));
-
             Ok(())
         } else {
             Err(RendererError::InvalidHandle(InvalidHandle))

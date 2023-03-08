@@ -800,11 +800,7 @@ impl Renderer {
     }
 
     pub fn remove_text(&mut self, id: usize) -> RendererResult<()> {
-        if let Some(allo) = &mut self.allocator {
-            self.text.remove_text_by_id(&self.context.device, allo, id)
-        } else {
-            panic!("No allocator!");
-        }
+        self.text.remove_text_by_id(id)
     }
 
     pub fn screenshot(&mut self) -> RendererResult<()> {
