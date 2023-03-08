@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use super::super::RendererResult;
 use super::super::error::InvalidHandle;
+use super::super::RendererResult;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct Handle(usize);
@@ -34,7 +34,6 @@ impl<T> Default for HandleArray<T> {
             next_handle: Handle(0),
         }
     }
-
 }
 
 impl<T> HandleArray<T> {
@@ -66,7 +65,11 @@ impl<T> HandleArray<T> {
         &self.data
     }
 
-    pub fn swap_by_handle(&mut self, handle1: Handle, handle2: Handle) -> Result<(), InvalidHandle> {
+    pub fn swap_by_handle(
+        &mut self,
+        handle1: Handle,
+        handle2: Handle,
+    ) -> Result<(), InvalidHandle> {
         if handle1 == handle2 {
             return Ok(());
         }

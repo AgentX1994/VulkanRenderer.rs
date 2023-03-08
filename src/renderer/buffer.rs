@@ -6,8 +6,8 @@ use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
 use gpu_allocator::MemoryLocation;
 
 use super::error::InvalidHandle;
+use super::utils::{Handle, HandleArray};
 use super::RendererResult;
-use super::utils::{HandleArray, Handle};
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct BufferHandle(Handle);
@@ -101,9 +101,7 @@ impl InternalBuffer {
         }
         if let Some(allocation) = &self.allocation {
             let data_ptr = allocation.mapped_ptr().unwrap().as_ptr() as *mut u8;
-            unsafe {
-                data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, data_len)
-            };
+            unsafe { data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, data_len) };
         } else {
             panic!("Buffer had no allocation!");
         }
@@ -170,7 +168,9 @@ impl BufferManager {
     }
 
     pub fn get_buffer(&self, handle: BufferHandle) -> Option<BufferDetails> {
-        self.handle_array.get(handle.0).map(|int_buf| int_buf.into())
+        self.handle_array
+            .get(handle.0)
+            .map(|int_buf| int_buf.into())
     }
 
     pub fn fill_buffer_by_handle<T>(
@@ -179,12 +179,17 @@ impl BufferManager {
         allocator: &mut Allocator,
         data: &[T],
     ) -> RendererResult<()> {
-        self.handle_array.get_mut(handle.0)
+        self.handle_array
+            .get_mut(handle.0)
             .ok_or_else(|| InvalidHandle.into())
             .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
-    pub fn queue_free(&mut self, handle: BufferHandle, last_frame_index: Option<u32>) -> RendererResult<()> {
+    pub fn queue_free(
+        &mut self,
+        handle: BufferHandle,
+        last_frame_index: Option<u32>,
+    ) -> RendererResult<()> {
         let int_buf = self.handle_array.remove(handle.0)?;
         self.to_free.push((int_buf, last_frame_index));
         Ok(())
@@ -258,6 +263,9 @@ impl Buffer {
             panic!("Tried to free inactive buffer!");
         }
         self.active = false;
-        self.manager.lock().unwrap().queue_free(self.handle, last_frame_index)
+        self.manager
+            .lock()
+            .unwrap()
+            .queue_free(self.handle, last_frame_index)
     }
 }

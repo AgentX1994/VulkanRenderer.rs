@@ -2,7 +2,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use nalgebra_glm as glm;
 
-use super::{model::{Model, ModelHandle}, vertex::Vertex, InstanceData, RendererResult};
+use super::{
+    model::{Model, ModelHandle},
+    vertex::Vertex,
+    InstanceData, RendererResult,
+};
 
 #[derive(Debug)]
 pub struct SceneObject {

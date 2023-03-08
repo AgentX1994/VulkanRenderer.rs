@@ -6,10 +6,7 @@ use gpu_allocator::{
     MemoryLocation,
 };
 
-use super::{
-    buffer::BufferManager,
-    RendererResult,
-};
+use super::{buffer::BufferManager, RendererResult};
 
 pub struct Texture {
     image: image::RgbaImage,
@@ -244,7 +241,8 @@ impl TextureStorage {
         command_pool: vk::CommandPool,
         queue: vk::Queue,
     ) -> RendererResult<usize> {
-        let texture = Texture::from_file(path, device, allocator, buffer_manager, command_pool, queue)?;
+        let texture =
+            Texture::from_file(path, device, allocator, buffer_manager, command_pool, queue)?;
         let new_id = self.textures.len();
         self.textures.push(texture);
         Ok(new_id)

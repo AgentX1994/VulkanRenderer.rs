@@ -14,7 +14,7 @@ pub struct ShaderModule {
     frag_shader_module: vk::ShaderModule,
     stages: [vk::PipelineShaderStageCreateInfo; 2],
     pub vert_reflection: ShaderReflection,
-    pub frag_reflection: ShaderReflection
+    pub frag_reflection: ShaderReflection,
 }
 
 fn dump_reflection_info(name: &str, module: &ShaderReflection) {
@@ -26,15 +26,29 @@ fn dump_reflection_info(name: &str, module: &ShaderReflection) {
     let generator = module.get_generator();
     let generator = match generator {
         spirv_reflect::types::ReflectGenerator::Unknown => "Unknown",
-        spirv_reflect::types::ReflectGenerator::KhronosLlvmSpirvTranslator => "KhronosLlvmSpirvTranslator",
-        spirv_reflect::types::ReflectGenerator::KhronosSpirvToolsAssembler => "KhronosSpirvToolsAssembler",
-        spirv_reflect::types::ReflectGenerator::KhronosGlslangReferenceFrontEnd => "KhronosGlslangReferenceFrontEnd",
-        spirv_reflect::types::ReflectGenerator::GoogleShadercOverGlslang => "GoogleShadercOverGlslang",
+        spirv_reflect::types::ReflectGenerator::KhronosLlvmSpirvTranslator => {
+            "KhronosLlvmSpirvTranslator"
+        }
+        spirv_reflect::types::ReflectGenerator::KhronosSpirvToolsAssembler => {
+            "KhronosSpirvToolsAssembler"
+        }
+        spirv_reflect::types::ReflectGenerator::KhronosGlslangReferenceFrontEnd => {
+            "KhronosGlslangReferenceFrontEnd"
+        }
+        spirv_reflect::types::ReflectGenerator::GoogleShadercOverGlslang => {
+            "GoogleShadercOverGlslang"
+        }
         spirv_reflect::types::ReflectGenerator::GoogleSpiregg => "GoogleSpiregg",
         spirv_reflect::types::ReflectGenerator::GoogleRspirv => "GoogleRspirv",
-        spirv_reflect::types::ReflectGenerator::XLegendMesaMesairSpirvTranslator => "XLegendMesaMesairSpirvTranslator",
-        spirv_reflect::types::ReflectGenerator::KhronosSpirvToolsLinker => "KhronosSpirvToolsLinker",
-        spirv_reflect::types::ReflectGenerator::WineVkd3dShaderCompiler => "WineVkd3dShaderCompiler",
+        spirv_reflect::types::ReflectGenerator::XLegendMesaMesairSpirvTranslator => {
+            "XLegendMesaMesairSpirvTranslator"
+        }
+        spirv_reflect::types::ReflectGenerator::KhronosSpirvToolsLinker => {
+            "KhronosSpirvToolsLinker"
+        }
+        spirv_reflect::types::ReflectGenerator::WineVkd3dShaderCompiler => {
+            "WineVkd3dShaderCompiler"
+        }
         spirv_reflect::types::ReflectGenerator::ClayClayShaderCompiler => "ClayClayShaderCompiler",
     };
     println!("\tGenerator: {generator}");
@@ -134,22 +148,32 @@ fn dump_reflection_info(name: &str, module: &ShaderReflection) {
         let descriptor_type = match binding.descriptor_type {
             spirv_reflect::types::ReflectDescriptorType::Undefined => "Undefined",
             spirv_reflect::types::ReflectDescriptorType::Sampler => "Sampler",
-            spirv_reflect::types::ReflectDescriptorType::CombinedImageSampler => "CombinedImageSampler",
+            spirv_reflect::types::ReflectDescriptorType::CombinedImageSampler => {
+                "CombinedImageSampler"
+            }
             spirv_reflect::types::ReflectDescriptorType::SampledImage => "SampledImage",
             spirv_reflect::types::ReflectDescriptorType::StorageImage => "StorageImage",
             spirv_reflect::types::ReflectDescriptorType::UniformTexelBuffer => "UniformTexelBuffer",
             spirv_reflect::types::ReflectDescriptorType::StorageTexelBuffer => "StorageTexelBuffer",
             spirv_reflect::types::ReflectDescriptorType::UniformBuffer => "UniformBuffer",
             spirv_reflect::types::ReflectDescriptorType::StorageBuffer => "StorageBuffer",
-            spirv_reflect::types::ReflectDescriptorType::UniformBufferDynamic => "UniformBufferDynamic",
-            spirv_reflect::types::ReflectDescriptorType::StorageBufferDynamic => "StorageBufferDynamic",
+            spirv_reflect::types::ReflectDescriptorType::UniformBufferDynamic => {
+                "UniformBufferDynamic"
+            }
+            spirv_reflect::types::ReflectDescriptorType::StorageBufferDynamic => {
+                "StorageBufferDynamic"
+            }
             spirv_reflect::types::ReflectDescriptorType::InputAttachment => "InputAttachment",
-            spirv_reflect::types::ReflectDescriptorType::AccelerationStructureNV => "AccelerationStructureNV",
+            spirv_reflect::types::ReflectDescriptorType::AccelerationStructureNV => {
+                "AccelerationStructureNV"
+            }
         };
         let resource_type = match binding.resource_type {
             spirv_reflect::types::ReflectResourceType::Undefined => "Undefined",
             spirv_reflect::types::ReflectResourceType::Sampler => "Sampler",
-            spirv_reflect::types::ReflectResourceType::CombinedImageSampler => "CombinedImageSampler",
+            spirv_reflect::types::ReflectResourceType::CombinedImageSampler => {
+                "CombinedImageSampler"
+            }
             spirv_reflect::types::ReflectResourceType::ConstantBufferView => "ConstantBufferView",
             spirv_reflect::types::ReflectResourceType::ShaderResourceView => "ShaderResourceView",
             spirv_reflect::types::ReflectResourceType::UnorderedAccessView => "UnorderedAccessView",
@@ -197,7 +221,7 @@ impl ShaderModule {
             frag_shader_module,
             stages,
             vert_reflection,
-            frag_reflection
+            frag_reflection,
         })
     }
 

@@ -1,7 +1,7 @@
 use std::error;
 use std::fmt;
 use std::io;
-use std::num::{ParseIntError, ParseFloatError};
+use std::num::{ParseFloatError, ParseIntError};
 
 use ash::vk;
 use gpu_allocator::AllocationError;
@@ -29,7 +29,7 @@ pub enum RendererError {
     FontError(&'static str),
     FloatParseError(ParseFloatError),
     IntParseError(ParseIntError),
-    SpirvError(&'static str)
+    SpirvError(&'static str),
 }
 
 impl fmt::Display for RendererError {

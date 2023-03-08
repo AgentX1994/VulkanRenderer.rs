@@ -1,7 +1,7 @@
 use ash::extensions::khr;
 use ash::vk;
 
-use gpu_allocator::vulkan::{Allocator};
+use gpu_allocator::vulkan::Allocator;
 
 use super::context::VulkanContext;
 use super::render_target::RenderTarget;

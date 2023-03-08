@@ -51,7 +51,6 @@ where
 
 impl<V, I> Model<V, I> {
     pub fn new(vertices: Vec<V>, indices: Vec<u32>) -> Model<V, I> {
-        
         Model {
             vertex_data: vertices,
             index_data: indices,
@@ -114,7 +113,7 @@ impl<V, I> Model<V, I> {
                 1, 3, 7, 1, 7, 5, // back
                 0, 2, 1, 1, 2, 3, // left
                 4, 5, 6, 5, 7, 6, // right
-            ]
+            ],
         )
     }
 
@@ -225,7 +224,7 @@ impl<V, I> Model<V, I> {
                 3, 7, 11, //
                 6, 7, 9, //
                 6, 11, 7, //
-            ]
+            ],
         )
     }
 
@@ -285,7 +284,8 @@ impl<V, I> Model<V, I> {
             if index >= self.first_invisible {
                 return Ok(());
             }
-            self.handle_array.swap_by_index(index, self.first_invisible - 1);
+            self.handle_array
+                .swap_by_index(index, self.first_invisible - 1);
             self.first_invisible -= 1;
             Ok(())
         } else {
@@ -318,7 +318,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>
+        buffer_manager: Arc<Mutex<BufferManager>>,
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.vertex_buffer {
             buffer.fill(allocator, &self.vertex_data)?;
@@ -343,7 +343,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>
+        buffer_manager: Arc<Mutex<BufferManager>>,
     ) -> RendererResult<()> {
         if let Some(buffer) = &mut self.index_buffer {
             buffer.fill(allocator, &self.index_data)?;
@@ -368,7 +368,7 @@ impl<V, I> Model<V, I> {
         &mut self,
         device: &ash::Device,
         allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>
+        buffer_manager: Arc<Mutex<BufferManager>>,
     ) -> RendererResult<()> {
         if self.first_invisible == 0 {
             return Ok(());
