@@ -193,7 +193,7 @@ impl ShaderModule {
         let vert_reflection = ShaderReflection::load_u32_data(vert)
             .map_err(crate::renderer::error::RendererError::SpirvError)?;
         dump_reflection_info("vert shader", &vert_reflection);
-        let frag_reflection = ShaderReflection::load_u32_data(vert)
+        let frag_reflection = ShaderReflection::load_u32_data(frag)
             .map_err(crate::renderer::error::RendererError::SpirvError)?;
         dump_reflection_info("frag_shader", &frag_reflection);
         let vert_shader_create_info = vk::ShaderModuleCreateInfo::builder().code(vert);

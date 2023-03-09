@@ -17,9 +17,7 @@ readonly layout (set=1, binding=0) buffer StorageBufferObject {
     vec3 data[];
 } sbo;
 
-// TODO MacOS doesn't like variable size descriptors. How to handle this?
-#define MAX_TEX 4
-layout (set=2, binding=0) uniform sampler2D texture_sampler[MAX_TEX];
+layout (set=2, binding=0) uniform sampler2D texture_sampler[];
 
 const float PI = 3.14159265358979323846264;
 
