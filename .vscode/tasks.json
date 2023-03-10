@@ -2,6 +2,21 @@
     "tasks": [
         {
             "type": "shell",
+            "label": "Rust: build release",
+            "command": "cargo",
+            "args": [
+                "build", "--release"
+            ],
+            "options": {
+                "cwd": "${fileDirname}"
+            },
+            "problemMatcher": [
+                "$rustc"
+            ],
+            "group": "build"
+        },
+        {
+            "type": "shell",
             "label": "Rust: build",
             "command": "cargo",
             "args": [

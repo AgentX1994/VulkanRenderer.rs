@@ -5,12 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "type": "cppvsdbg",
+            "type": "lldb",
             "request": "launch",
-            "name": "Build and launch",
-            "program": "${workspaceRoot}/target/debug/vulkan_rust.exe",
+            "name": "Build and launch (Debug)",
+            "program": "${workspaceFolder}/target/debug/vulkan_rust",
             "cwd": "${workspaceRoot}",
+            "args": [],
             "preLaunchTask": "Rust: build"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Build and launch (Release)",
+            "program": "${workspaceFolder}/target/release/vulkan_rust",
+            "cwd": "${workspaceRoot}",
+            "args": [],
+            "preLaunchTask": "Rust: build release"
         }
     ]
 }
