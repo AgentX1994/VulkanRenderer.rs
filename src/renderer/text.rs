@@ -5,19 +5,20 @@ use std::sync::Mutex;
 use ash::vk;
 use ash::Device;
 
-use gpu_allocator::vulkan::AllocationCreateDesc;
-use gpu_allocator::vulkan::{Allocation, Allocator};
+use gpu_allocator::vulkan::Allocator;
 use gpu_allocator::MemoryLocation;
 use memoffset::offset_of;
 
-use super::buffer::Buffer;
-use super::buffer::BufferManager;
-use super::error::InvalidHandle;
-use super::error::RendererError;
-use super::material::MaterialStorage;
-use super::pipeline::GraphicsPipeline;
+use super::material::VertexInputDescription;
 use super::swapchain::Swapchain;
 use super::RendererResult;
+use super::{
+    buffer::{Buffer, BufferManager},
+    descriptor::{DescriptorAllocator, DescriptorLayoutCache},
+    error::{InvalidHandle, RendererError},
+    material::{MaterialData, MaterialHandle, MaterialSystem, MeshPassType, ShaderParameters},
+    texture::{TextureHandle, TextureStorage},
+};
 
 struct CharacterData {
     cur_x: usize,
@@ -35,11 +36,9 @@ struct CharacterData {
 struct TextAtlasTexture {
     width: f32,
     height: f32,
-    image: vk::Image,
-    image_view: vk::ImageView,
-    sampler: vk::Sampler,
-    allocation: Option<Allocation>,
+    texture_handle: TextureHandle,
     char_data: HashMap<u16, CharacterData>,
+    material_handle: Option<MaterialHandle>,
 }
 
 impl TextAtlasTexture {
@@ -49,211 +48,31 @@ impl TextAtlasTexture {
         height: u32,
         char_data: HashMap<u16, CharacterData>,
         device: &Device,
+        texture_storage: &mut TextureStorage,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
     ) -> RendererResult<Self> {
-        // Create Image
-        let img_create_info = vk::ImageCreateInfo::builder()
-            .image_type(vk::ImageType::TYPE_2D)
-            .extent(vk::Extent3D {
-                width,
-                height,
-                depth: 1,
-            })
-            .mip_levels(1)
-            .array_layers(1)
-            .format(vk::Format::R8_SRGB)
-            .samples(vk::SampleCountFlags::TYPE_1)
-            .usage(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED);
-        let image = unsafe { device.create_image(&img_create_info, None) }?;
-
-        //  allocate memory for image
-        let reqs = unsafe { device.get_image_memory_requirements(image) };
-        println!(
-            "Creating Texture atlas of size {}x{}, {} bytes",
-            width, height, reqs.size
-        );
-        let allocation = allocator.allocate(&AllocationCreateDesc {
-            name: "text texture",
-            requirements: reqs,
-            location: MemoryLocation::GpuOnly,
-            linear: false,
-        })?;
-
-        // bind memory to image
-        unsafe { device.bind_image_memory(image, allocation.memory(), allocation.offset()) }?;
-
-        // Create image view
-        let view_create_info = vk::ImageViewCreateInfo::builder()
-            .image(image)
-            .view_type(vk::ImageViewType::TYPE_2D)
-            .format(vk::Format::R8_SRGB)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                level_count: 1,
-                layer_count: 1,
-                ..Default::default()
-            });
-        let image_view = unsafe { device.create_image_view(&view_create_info, None) }?;
-
-        // Create sampler
-        let sampler_info = vk::SamplerCreateInfo::builder()
-            .mag_filter(vk::Filter::LINEAR)
-            .min_filter(vk::Filter::LINEAR);
-        let sampler = unsafe { device.create_sampler(&sampler_info, None) }?;
-
-        // Create buffer and fill with data
-        let mut buffer = BufferManager::new_buffer(
-            buffer_manager,
+        let texture_handle = texture_storage.new_texture_from_u8(
+            data,
+            width,
+            height,
             device,
             allocator,
-            data.len() as u64,
-            vk::BufferUsageFlags::TRANSFER_SRC,
-            MemoryLocation::CpuToGpu,
+            buffer_manager,
+            command_pool,
+            queue,
         )?;
-        buffer.fill(allocator, data)?;
-
-        // Create command buffer for copy commands
-        let command_buf_allocate_info = vk::CommandBufferAllocateInfo::builder()
-            .command_pool(*command_pool)
-            .command_buffer_count(1);
-        let copy_buf = unsafe { device.allocate_command_buffers(&command_buf_allocate_info) }?[0];
-
-        // begin command buffer
-        let cmd_begin_info = vk::CommandBufferBeginInfo::builder()
-            .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-        unsafe { device.begin_command_buffer(copy_buf, &cmd_begin_info) }?;
-
-        // Transition image layout to transfer dst
-        let barrier = vk::ImageMemoryBarrier::builder()
-            .image(image)
-            .src_access_mask(vk::AccessFlags::empty())
-            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-            .old_layout(vk::ImageLayout::UNDEFINED)
-            .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            })
-            .build();
-        unsafe {
-            device.cmd_pipeline_barrier(
-                copy_buf,
-                vk::PipelineStageFlags::TOP_OF_PIPE,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            )
-        };
-
-        // Copy buffer to image
-        let image_subresource = vk::ImageSubresourceLayers {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            mip_level: 0,
-            base_array_layer: 0,
-            layer_count: 1,
-        };
-        let region = vk::BufferImageCopy {
-            buffer_offset: 0,
-            buffer_row_length: 0,
-            buffer_image_height: 0,
-            image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-            image_extent: vk::Extent3D {
-                width,
-                height,
-                depth: 1,
-            },
-            image_subresource,
-        };
-        unsafe {
-            let int_buf = buffer.get_buffer();
-            device.cmd_copy_buffer_to_image(
-                copy_buf,
-                int_buf.buffer,
-                image,
-                vk::ImageLayout::TRANSFER_DST_OPTIMAL,
-                &[region],
-            )
-        }
-
-        // Transition image layout for use as texture
-        let barrier = vk::ImageMemoryBarrier::builder()
-            .image(image)
-            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-            .dst_access_mask(vk::AccessFlags::SHADER_READ)
-            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-            .new_layout(vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            })
-            .build();
-        unsafe {
-            device.cmd_pipeline_barrier(
-                copy_buf,
-                vk::PipelineStageFlags::TRANSFER,
-                vk::PipelineStageFlags::FRAGMENT_SHADER,
-                vk::DependencyFlags::empty(),
-                &[],
-                &[],
-                &[barrier],
-            )
-        };
-
-        // End command buffer
-        unsafe { device.end_command_buffer(copy_buf) }?;
-
-        // Prepare to submit command buffer
-        let submit_infos = [vk::SubmitInfo::builder()
-            .command_buffers(&[copy_buf])
-            .build()];
-        // Fence to wait for command buffer to finish
-        let fence = unsafe { device.create_fence(&vk::FenceCreateInfo::default(), None) }?;
-
-        // Submit the commands and wait for completion
-        unsafe { device.queue_submit(*queue, &submit_infos, fence) }?;
-        unsafe { device.wait_for_fences(&[fence], true, std::u64::MAX) }?;
-
-        // Cleanup
-        unsafe { device.destroy_fence(fence, None) };
-        buffer.queue_free(None)?;
-        unsafe { device.free_command_buffers(*command_pool, &[copy_buf]) };
 
         // Done
         Ok(TextAtlasTexture {
             width: width as f32,
             height: height as f32,
-            image,
-            image_view,
-            sampler,
-            allocation: Some(allocation),
+            texture_handle,
             char_data,
+            material_handle: None,
         })
-    }
-
-    pub fn destroy(&mut self, device: &Device, allocator: &mut Allocator) {
-        allocator
-            .free(
-                self.allocation
-                    .take()
-                    .expect("Text texture had no allocation!"),
-            )
-            .expect("Could not free texture allocation");
-        unsafe {
-            device.destroy_sampler(self.sampler, None);
-            device.destroy_image_view(self.image_view, None);
-            device.destroy_image(self.image, None);
-        }
     }
 }
 
@@ -300,6 +119,14 @@ impl TextVertexData {
             stride: std::mem::size_of::<TextVertexData>() as u32,
             input_rate: vk::VertexInputRate::VERTEX,
         }]
+    }
+
+    pub fn get_vertex_description() -> VertexInputDescription {
+        VertexInputDescription {
+            bindings: Self::get_vertex_bindings().to_vec(),
+            attributes: Self::get_vertex_attributes().to_vec(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+        }
     }
 }
 
@@ -350,23 +177,21 @@ impl TextBuffer {
 pub struct TextHandler {
     vertex_data: HashMap<usize, TextBuffer>,
     font: fontdue::Font,
+    font_name: String,
     atlases: Vec<(f32, TextAtlasTexture)>,
-    descriptor_pool: Option<vk::DescriptorPool>,
-    // TODO deal with the fact that px is f32
-    descriptor_sets: HashMap<u32, Vec<vk::DescriptorSet>>,
 }
 
 impl TextHandler {
     pub fn new<P: AsRef<std::path::Path>>(font_path: P) -> RendererResult<TextHandler> {
+        let font_name = font_path.as_ref().to_string_lossy().into_owned();
         let font_data = std::fs::read(font_path)?;
         let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
 
         Ok(TextHandler {
             vertex_data: HashMap::new(),
             font,
+            font_name,
             atlases: vec![],
-            descriptor_pool: None,
-            descriptor_sets: HashMap::new(),
         })
     }
 
@@ -375,6 +200,10 @@ impl TextHandler {
         px: f32,
         max_extent: &vk::Extent3D,
         device: &Device,
+        texture_storage: &mut TextureStorage,
+        descriptor_layout_cache: &mut DescriptorLayoutCache,
+        descriptor_allocator: &mut DescriptorAllocator,
+        material_system: &mut MaterialSystem,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
@@ -439,17 +268,36 @@ impl TextHandler {
             }
         }
 
-        let atlas = TextAtlasTexture::from_u8s(
+        let mut atlas = TextAtlasTexture::from_u8s(
             &data,
             max_width as u32,
             max_height as u32,
             char_data,
             device,
+            texture_storage,
             allocator,
             buffer_manager,
             command_pool,
             queue,
         )?;
+
+        // Create new material for this atlas
+        let mat_data = MaterialData {
+            base_template: "text".to_string(),
+            textures: vec![atlas.texture_handle],
+            parameters: ShaderParameters {},
+        };
+
+        let handle = material_system.build_material(
+            device,
+            texture_storage,
+            descriptor_layout_cache,
+            descriptor_allocator,
+            &format!("{} {}px", self.font_name, px),
+            mat_data,
+        )?;
+
+        atlas.material_handle = Some(handle);
 
         Ok(atlas)
     }
@@ -460,12 +308,15 @@ impl TextHandler {
         color: [f32; 3],
         max_extent: &vk::Extent3D,
         device: &Device,
+        texture_storage: &mut TextureStorage,
+        descriptor_layout_cache: &mut DescriptorLayoutCache,
+        descriptor_allocator: &mut DescriptorAllocator,
+        material_system: &mut MaterialSystem,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-    ) -> RendererResult<(Vec<Letter>, bool)> {
-        let mut added_atlas = false;
+    ) -> RendererResult<Vec<Letter>> {
         let mut layout =
             fontdue::layout::Layout::new(fontdue::layout::CoordinateSystem::PositiveYUp);
         let settings = fontdue::layout::LayoutSettings {
@@ -479,13 +330,16 @@ impl TextHandler {
                     style.px,
                     max_extent,
                     device,
+                    texture_storage,
+                    descriptor_layout_cache,
+                    descriptor_allocator,
+                    material_system,
                     allocator,
                     buffer_manager.clone(),
                     command_pool,
                     queue,
                 )?;
                 self.atlases.push((style.px, atlas));
-                added_atlas = true;
             }
         }
         let mut output = vec![];
@@ -495,7 +349,7 @@ impl TextHandler {
                 position_and_shape: *glyph,
             });
         }
-        Ok((output, added_atlas))
+        Ok(output)
     }
 
     pub fn add_text(
@@ -506,18 +360,25 @@ impl TextHandler {
         window: &winit::window::Window,
         max_extent: &vk::Extent3D,
         device: &Device,
+        texture_storage: &mut TextureStorage,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
         swapchain: &Swapchain,
-        material_storage: &MaterialStorage,
+        descriptor_layout_cache: &mut DescriptorLayoutCache,
+        descriptor_allocator: &mut DescriptorAllocator,
+        material_system: &mut MaterialSystem,
     ) -> RendererResult<Vec<usize>> {
-        let (letters, atlas_added) = self.create_letters(
+        let letters = self.create_letters(
             styles,
             color,
             max_extent,
             device,
+            texture_storage,
+            descriptor_layout_cache,
+            descriptor_allocator,
+            material_system,
             allocator,
             buffer_manager.clone(),
             command_pool,
@@ -606,9 +467,6 @@ impl TextHandler {
         let text_buffer = TextBuffer::new(px, vertex_data, device, allocator, buffer_manager)?;
         self.vertex_data.insert(id, text_buffer);
         ret_ids.push(id);
-        if atlas_added {
-            self.update_descriptors(swapchain, device, material_storage)?;
-        }
         Ok(ret_ids)
     }
 
@@ -623,113 +481,63 @@ impl TextHandler {
         }
     }
 
-    pub fn update_descriptors(
-        &mut self,
-        swapchain: &Swapchain,
-        device: &Device,
-        material_storage: &MaterialStorage,
-    ) -> RendererResult<()> {
-        let material = material_storage
-            .get_material("text")
-            .expect("No \"text\" material!");
-        let pipeline = &material.pipeline;
-        if let Some(pool) = self.descriptor_pool {
-            unsafe {
-                device.destroy_descriptor_pool(pool, None);
-            }
-        }
-        let pool_sizes = [vk::DescriptorPoolSize {
-            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-            descriptor_count: GraphicsPipeline::MAXIMUM_NUMBER_OF_TEXTURES
-                * swapchain.get_actual_image_count(),
-        }];
-        let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count() * self.atlases.len() as u32)
-            .pool_sizes(&pool_sizes);
-        let descriptor_pool =
-            unsafe { device.create_descriptor_pool(&descriptor_pool_info, None) }?;
-        self.descriptor_pool = Some(descriptor_pool);
-
-        let desc_layouts_text = vec![
-            // This pipeline has to exist, so we know this will succeed
-            pipeline.descriptor_set_layouts[0];
-            swapchain.get_actual_image_count() as usize
-        ];
-        let descriptor_set_allocate_info_text = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(descriptor_pool)
-            .set_layouts(&desc_layouts_text);
-        self.descriptor_sets.clear();
-        for (px, atlas) in self.atlases.iter() {
-            let descriptor_sets_text =
-                unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_text) }?;
-            for i in 0..swapchain.get_actual_image_count() {
-                let image_infos: [vk::DescriptorImageInfo; 1] = [vk::DescriptorImageInfo {
-                    image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-                    image_view: atlas.image_view,
-                    sampler: atlas.sampler,
-                }];
-                let descriptor_write_image = vk::WriteDescriptorSet::builder()
-                    .dst_set(descriptor_sets_text[i as usize])
-                    .dst_binding(0)
-                    .dst_array_element(0)
-                    .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                    .image_info(&image_infos)
-                    .build();
-                unsafe {
-                    device.update_descriptor_sets(&[descriptor_write_image], &[]);
-                }
-            }
-            self.descriptor_sets
-                .insert(*px as u32, descriptor_sets_text);
-        }
-        Ok(())
-    }
-
     pub fn draw(
         &mut self,
         device: &Device,
         cmd_buf: vk::CommandBuffer,
         index: usize,
         extent: vk::Extent2D,
-        material_storage: &MaterialStorage,
-    ) {
-        let material = material_storage
-            .get_material("text")
-            .expect("No \"text\" material!");
-        let pipeline = &material.pipeline;
-        unsafe {
-            device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline);
-            let viewports = [vk::Viewport {
-                x: 0.,
-                y: 0.,
-                width: extent.width as f32,
-                height: extent.height as f32,
-                min_depth: 0.,
-                max_depth: 1.,
-            }];
-            let scissors = [vk::Rect2D {
-                offset: vk::Offset2D { x: 0, y: 0 },
-                extent,
-            }];
-
-            device.cmd_set_viewport(cmd_buf, 0, &viewports);
-            device.cmd_set_scissor(cmd_buf, 0, &scissors);
-        }
+        material_system: &MaterialSystem,
+    ) -> RendererResult<()> {
+        let viewports = [vk::Viewport {
+            x: 0.,
+            y: 0.,
+            width: extent.width as f32,
+            height: extent.height as f32,
+            min_depth: 0.,
+            max_depth: 1.,
+        }];
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D { x: 0, y: 0 },
+            extent,
+        }];
+        let mut pipeline = vk::Pipeline::null();
         for text_buffer in self.vertex_data.values_mut() {
+            let atlas = if let Some((_px, atlas)) = self
+                .atlases
+                .iter()
+                .find(|(px, _atlas)| *px == text_buffer.px)
+            {
+                atlas
+            } else {
+                println!("Could not find atlas for px {}", text_buffer.px);
+                continue;
+            };
+            let material_handle = if let Some(handle) = atlas.material_handle {
+                handle
+            } else {
+                println!("Atlas {} px has no material handle!", text_buffer.px);
+                continue;
+            };
+            let material = material_system.get_material_by_handle(material_handle)?;
+            let effect_template =
+                material_system.get_effect_template_by_handle(material.original)?;
+            let layout = effect_template.pass_shaders[MeshPassType::Forward].layout;
+            if pipeline != effect_template.pass_shaders[MeshPassType::Forward].pipeline {
+                pipeline = effect_template.pass_shaders[MeshPassType::Forward].pipeline;
+                unsafe {
+                    device.cmd_bind_pipeline(cmd_buf, vk::PipelineBindPoint::GRAPHICS, pipeline);
+                    device.cmd_set_viewport(cmd_buf, 0, &viewports);
+                    device.cmd_set_scissor(cmd_buf, 0, &scissors);
+                }
+            }
             unsafe {
-                let descriptor_set = if let Some(desc_set_vec) =
-                    self.descriptor_sets.get(&(text_buffer.px as u32))
-                {
-                    desc_set_vec[index]
-                } else {
-                    panic!("Could not get descriptor set for px");
-                };
                 device.cmd_bind_descriptor_sets(
                     cmd_buf,
                     vk::PipelineBindPoint::GRAPHICS,
-                    pipeline.pipeline_layout,
+                    layout,
                     0,
-                    &[descriptor_set],
+                    &[material.pass_sets[MeshPassType::Forward]],
                     &[],
                 );
                 let int_buf = text_buffer.vertex_buffer.get_buffer();
@@ -744,14 +552,10 @@ impl TextHandler {
                 text_buffer.last_image_index = Some(index as u32);
             }
         }
+        Ok(())
     }
 
-    pub fn destroy(&mut self, device: &Device, allocator: &mut Allocator) {
-        if let Some(pool) = self.descriptor_pool.take() {
-            unsafe {
-                device.destroy_descriptor_pool(pool, None);
-            }
-        }
+    pub fn destroy(&mut self) {
         for text_buffer in self.vertex_data.values_mut() {
             text_buffer
                 .vertex_buffer
@@ -759,8 +563,6 @@ impl TextHandler {
                 .expect("Could not queue buffer for free");
         }
         self.vertex_data.clear();
-        for (_px, mut atlas) in self.atlases.drain(0..self.atlases.len()) {
-            atlas.destroy(device, allocator);
-        }
+        self.atlases.clear();
     }
 }

@@ -13,15 +13,15 @@ use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc
 mod buffer;
 pub mod camera;
 mod context;
+mod descriptor;
 pub mod error;
 pub mod light;
 mod material;
 pub mod model;
-mod pipeline;
 mod queue;
 mod render_target;
 pub mod scene;
-mod shader_module;
+mod shaders;
 mod swapchain;
 mod text;
 mod texture;
@@ -31,16 +31,17 @@ pub mod vertex;
 use buffer::Buffer;
 use camera::Camera;
 use model::Model;
-use pipeline::GraphicsPipeline;
 use swapchain::Swapchain;
 use vertex::Vertex;
 
 use self::buffer::BufferManager;
 use self::context::VulkanContext;
+use self::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use self::light::LightManager;
-use self::material::MaterialStorage;
+use self::material::{MaterialData, MaterialSystem, MeshPassType, ShaderParameters};
+use self::shaders::ShaderCache;
 use self::text::TextHandler;
-use self::texture::TextureStorage;
+use self::texture::{TextureHandle, TextureStorage};
 use self::utils::InternalWindow;
 
 pub use error::RendererResult;
@@ -95,17 +96,18 @@ pub struct Renderer {
     pub buffer_manager: Arc<Mutex<BufferManager>>,
     swapchain: Swapchain,
     render_pass: vk::RenderPass,
-    material_storage: MaterialStorage,
+    shader_cache: ShaderCache,
+    descriptor_layout_cache: DescriptorLayoutCache,
+    descriptor_allocator: DescriptorAllocator,
+    material_system: MaterialSystem,
     graphics_command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_data: Vec<FrameData>,
     images_in_flight: Vec<vk::Fence>,
     current_image: usize,
     uniform_buffer: Buffer,
-    descriptor_pool: vk::DescriptorPool,
-    descriptor_sets_camera: Vec<vk::DescriptorSet>,
-    descriptor_sets_lights: Vec<vk::DescriptorSet>,
-    descriptor_sets_texture: Vec<vk::DescriptorSet>,
+    descriptor_set_camera: vk::DescriptorSet,
+    descriptor_set_lights: vk::DescriptorSet,
     light_buffer: Buffer,
     texture_storage: TextureStorage,
     number_of_textures: u32,
@@ -194,95 +196,6 @@ impl Renderer {
             .collect()
     }
 
-    fn create_descriptor_sets(
-        device: &ash::Device,
-        pipeline: &GraphicsPipeline,
-        pool: &vk::DescriptorPool,
-        swapchain: &Swapchain,
-        uniform_buffer: &Buffer,
-        light_buffer: &Buffer,
-        num_textures: u32,
-    ) -> RendererResult<(
-        Vec<vk::DescriptorSet>,
-        Vec<vk::DescriptorSet>,
-        Vec<vk::DescriptorSet>,
-    )> {
-        // Now create the descriptor sets, one for each swapchain image
-        let descriptor_layouts_camera =
-            vec![pipeline.descriptor_set_layouts[0]; swapchain.get_actual_image_count() as usize];
-        let descriptor_set_allocate_info_camera = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(*pool)
-            .set_layouts(&descriptor_layouts_camera);
-        let descriptor_sets_camera =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_camera)? };
-
-        let descriptor_layouts_lights =
-            vec![pipeline.descriptor_set_layouts[1]; swapchain.get_actual_image_count() as usize];
-        let descriptor_set_allocate_info_lights = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(*pool)
-            .set_layouts(&descriptor_layouts_lights);
-        let descriptor_sets_lights =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_lights)? };
-
-        let descriptor_layouts_texture =
-            vec![pipeline.descriptor_set_layouts[2]; swapchain.get_actual_image_count() as usize];
-        let descriptor_counts_texture =
-            vec![num_textures; swapchain.get_actual_image_count() as usize];
-        let mut variable_descriptor_allocate_info_texture =
-            vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
-                .descriptor_counts(&descriptor_counts_texture);
-        let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
-            .descriptor_pool(*pool)
-            .set_layouts(&descriptor_layouts_texture)
-            .push_next(&mut variable_descriptor_allocate_info_texture);
-        let descriptor_sets_texture =
-            unsafe { device.allocate_descriptor_sets(&descriptor_set_allocate_info_texture)? };
-
-        for ds in descriptor_sets_camera.iter() {
-            let int_buf = uniform_buffer.get_buffer();
-            let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: int_buf.buffer,
-                offset: 0,
-                range: std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
-            }];
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-                .buffer_info(&buffer_info)
-                .build()];
-            unsafe {
-                device.update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
-
-        for ds in descriptor_sets_lights.iter() {
-            let int_buf = light_buffer.get_buffer();
-            let buffer_info = [vk::DescriptorBufferInfo {
-                buffer: int_buf.buffer,
-                offset: 0,
-                range: 8,
-            }];
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_info)
-                .build()];
-            unsafe {
-                device.update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
-
-        Ok((
-            descriptor_sets_camera,
-            descriptor_sets_lights,
-            descriptor_sets_texture,
-        ))
-    }
-
     pub fn new(
         name: &str,
         window_width: u32,
@@ -326,8 +239,6 @@ impl Renderer {
             &render_pass,
         )?;
 
-        let material_storage = MaterialStorage::new(&context.device, render_pass)?;
-
         // Create command pools
         let graphics_commandpool_info = vk::CommandPoolCreateInfo::builder()
             .queue_family_index(context.graphics_queue.index)
@@ -359,11 +270,15 @@ impl Renderer {
             buffer_manager.clone(),
             &context.device,
             &mut allocator,
-            std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64,
+            (std::mem::size_of::<[[[f32; 4]; 4]; 2]>()
+                * swapchain.get_actual_image_count() as usize) as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             MemoryLocation::CpuToGpu,
         )?;
-        uniform_buffer.fill(&mut allocator, &camera_transforms)?;
+        for i in 0..swapchain.get_actual_image_count() as usize {
+            let offset = i * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
+            uniform_buffer.copy_to_offset(&mut allocator, &camera_transforms, offset)?;
+        }
 
         // Create storage buffer for lights
         let mut light_buffer = BufferManager::new_buffer(
@@ -376,48 +291,66 @@ impl Renderer {
         )?;
         light_buffer.fill(&mut allocator, &[0.0f32; 2])?;
 
-        // Create descriptor pool
-        let pool_sizes = [
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: swapchain.get_actual_image_count(),
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::STORAGE_BUFFER,
-                descriptor_count: swapchain.get_actual_image_count(),
-            },
-            vk::DescriptorPoolSize {
-                ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-                descriptor_count: GraphicsPipeline::MAXIMUM_NUMBER_OF_TEXTURES
-                    * swapchain.get_actual_image_count(),
-            },
-        ];
+        let mut shader_cache = ShaderCache::new(&context.device)?;
+        let mut material_system =
+            MaterialSystem::new(&context.device, render_pass, &mut shader_cache)?;
 
-        let descriptor_pool_info = vk::DescriptorPoolCreateInfo::builder()
-            .max_sets(swapchain.get_actual_image_count() * 3)
-            .pool_sizes(&pool_sizes)
-            .flags(vk::DescriptorPoolCreateFlags::FREE_DESCRIPTOR_SET);
-        let descriptor_pool = unsafe {
-            context
-                .device
-                .create_descriptor_pool(&descriptor_pool_info, None)?
-        };
-
-        let material = material_storage
-            .get_material("default")
-            .expect("No \"default\" material");
-        let (descriptor_sets_camera, descriptor_sets_lights, descriptor_sets_texture) =
-            Self::create_descriptor_sets(
-                &context.device,
-                &material.pipeline,
-                &descriptor_pool,
-                &swapchain,
-                &uniform_buffer,
-                &light_buffer,
-                0,
-            )?;
+        let mut descriptor_layout_cache = DescriptorLayoutCache::default();
+        let mut descriptor_allocator = DescriptorAllocator::default();
 
         let text = TextHandler::new("Roboto-Regular.ttf")?;
+
+        let mut texture_storage = TextureStorage::default();
+
+        let default_template_handle = material_system.get_effect_template_handle("default")?;
+        let texture_handle = texture_storage.new_texture_from_file(
+            "plain_white.jpg",
+            &context.device,
+            &mut allocator,
+            buffer_manager.clone(),
+            graphics_command_pool,
+            context.graphics_queue.queue,
+        )?;
+        let default_material_data = MaterialData {
+            textures: vec![texture_handle],
+            parameters: ShaderParameters {},
+            base_template: "default".to_string(),
+        };
+        let material_handle = material_system.build_material(
+            &context.device,
+            &texture_storage,
+            &mut descriptor_layout_cache,
+            &mut descriptor_allocator,
+            "default",
+            default_material_data,
+        )?;
+        let default_template =
+            material_system.get_effect_template_by_handle(default_template_handle)?;
+
+        let effect_handle = default_template.pass_shaders[MeshPassType::Forward]
+            .effect_handle
+            .expect("No effect handle?");
+        let effect = shader_cache.get_shader_effect_by_handle(effect_handle)?;
+
+        let descriptor_set_camera =
+            descriptor_allocator.allocate(&context.device, effect.set_layouts[0])?;
+        // Update camera descriptor sets
+        unsafe {
+            let buffer_info = [vk::DescriptorBufferInfo::builder()
+                .buffer(uniform_buffer.get_buffer().buffer)
+                .range(std::mem::size_of::<[[[f32; 4]; 4]; 2]>() as u64)
+                .build()];
+            let descriptor_write = vk::WriteDescriptorSet::builder()
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)
+                .dst_binding(0)
+                .dst_set(descriptor_set_camera)
+                .buffer_info(&buffer_info[..]);
+            context
+                .device
+                .update_descriptor_sets(&[*descriptor_write], &[]);
+        }
+        let descriptor_set_lights =
+            descriptor_allocator.allocate(&context.device, effect.set_layouts[1])?;
 
         Ok(Renderer {
             dropped: false,
@@ -428,17 +361,18 @@ impl Renderer {
             graphics_command_pool,
             command_buffers,
             render_pass,
-            material_storage,
+            shader_cache,
+            descriptor_layout_cache,
+            descriptor_allocator,
+            material_system,
             frame_data,
             images_in_flight,
             current_image: 0,
             uniform_buffer,
-            descriptor_pool,
-            descriptor_sets_camera,
-            descriptor_sets_lights,
-            descriptor_sets_texture,
+            descriptor_set_camera,
+            descriptor_set_lights,
             light_buffer,
-            texture_storage: TextureStorage::default(),
+            texture_storage,
             number_of_textures: 0,
             text,
             models: vec![],
@@ -451,6 +385,7 @@ impl Renderer {
         }
         self.context.refresh_surface_data()?;
         if let Some(allo) = &mut self.allocator {
+            let old_image_count = self.swapchain.get_actual_image_count();
             self.swapchain.destroy(&self.context, allo);
             self.swapchain = Swapchain::new(
                 &self.context,
@@ -460,39 +395,7 @@ impl Renderer {
                 height,
                 &self.render_pass,
             )?;
-            unsafe {
-                self.context
-                    .device
-                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_camera)?;
-                self.context
-                    .device
-                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_lights)?;
-                self.context
-                    .device
-                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)?;
-            }
-            let material = self
-                .material_storage
-                .get_material("default")
-                .expect("No \"default\" material");
-            let (a, b, c) = Self::create_descriptor_sets(
-                &self.context.device,
-                &material.pipeline,
-                &self.descriptor_pool,
-                &self.swapchain,
-                &self.uniform_buffer,
-                &self.light_buffer,
-                self.texture_storage.get_number_of_textures() as u32,
-            )?;
-            self.descriptor_sets_camera = a;
-            self.descriptor_sets_lights = b;
-            self.descriptor_sets_texture = c;
-            self.update_textures()?;
-            self.text.update_descriptors(
-                &self.swapchain,
-                &self.context.device,
-                &self.material_storage,
-            )?;
+            assert!(old_image_count == self.swapchain.get_actual_image_count());
         }
         Ok(())
     }
@@ -559,14 +462,22 @@ impl Renderer {
                 &render_pass_begin_info,
                 vk::SubpassContents::INLINE,
             );
-            let material = self
-                .material_storage
-                .get_material("default")
+            let material_handle = self
+                .material_system
+                .get_material_handle("default")
                 .expect("No \"default\" material");
+            let material = self
+                .material_system
+                .get_material_by_handle(material_handle)
+                .expect("Could not get default material");
+            let effect_template = self
+                .material_system
+                .get_effect_template_by_handle(material.original)
+                .expect("No default template");
             self.context.device.cmd_bind_pipeline(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                material.pipeline.pipeline,
+                effect_template.pass_shaders[MeshPassType::Forward].pipeline,
             );
 
             let viewports = [vk::Viewport {
@@ -587,17 +498,20 @@ impl Renderer {
                 .cmd_set_viewport(*cmd_buf, 0, &viewports);
             self.context.device.cmd_set_scissor(*cmd_buf, 0, &scissors);
 
+            let camera_buffer_offset = image_index * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
+
             self.context.device.cmd_bind_descriptor_sets(
                 *cmd_buf,
                 vk::PipelineBindPoint::GRAPHICS,
-                material.pipeline.pipeline_layout,
+                effect_template.pass_shaders[MeshPassType::Forward].layout,
                 0,
                 &[
-                    self.descriptor_sets_camera[image_index],
-                    self.descriptor_sets_lights[image_index],
-                    self.descriptor_sets_texture[image_index],
+                    self.descriptor_set_camera,
+                    self.descriptor_set_lights,
+                    material.pass_sets[MeshPassType::Forward],
                 ],
-                &[],
+                // Only the camera offset changes
+                &[camera_buffer_offset as u32],
             );
             for m in &self.models {
                 m.borrow().draw(&self.context.device, *cmd_buf);
@@ -607,8 +521,8 @@ impl Renderer {
                 *cmd_buf,
                 image_index,
                 self.swapchain.get_extent(),
-                &self.material_storage,
-            );
+                &self.material_system,
+            )?;
             self.context.device.cmd_end_render_pass(*cmd_buf);
             self.context.device.end_command_buffer(*cmd_buf)?;
         }
@@ -662,13 +576,20 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render(&mut self) -> RendererResult<()> {
+    pub fn render(&mut self, camera: &Camera) -> RendererResult<()> {
         self.wait_for_next_frame_fence()?;
         let image_index = self.swapchain.get_next_image(
             std::u64::MAX,
             &self.frame_data[self.current_image].image_available_semaphore,
             vk::Fence::null(),
         )?;
+
+        if let Some(alloc) = &mut self.allocator {
+            let offset = image_index as usize * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
+            camera.update_buffer(alloc, &mut self.uniform_buffer, offset)?;
+        } else {
+            panic!("No allocator!");
+        }
 
         self.wait_for_image_fence_and_set_new_fence(image_index as usize)?;
 
@@ -686,28 +607,23 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn update_uniforms_from_camera(&mut self, camera: &Camera) -> RendererResult<()> {
-        if let Some(alloc) = &mut self.allocator {
-            Ok(camera.update_buffer(alloc, &mut self.uniform_buffer)?)
-        } else {
-            panic!("No allocator!");
-        }
-    }
-
     pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> RendererResult<()> {
         if let Some(alloc) = &mut self.allocator {
             Ok(lights.update_buffer(
                 &self.context.device,
                 alloc,
                 &mut self.light_buffer,
-                &mut self.descriptor_sets_lights[..],
+                self.descriptor_set_lights,
             )?)
         } else {
             panic!("No allocator!");
         }
     }
 
-    pub fn new_texture_from_file<P: AsRef<Path>>(&mut self, path: P) -> RendererResult<usize> {
+    pub fn new_texture_from_file<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+    ) -> RendererResult<TextureHandle> {
         if let Some(allo) = &mut self.allocator {
             Ok(self.texture_storage.new_texture_from_file(
                 path,
@@ -720,56 +636,6 @@ impl Renderer {
         } else {
             panic!("No allocator!");
         }
-    }
-
-    pub fn update_textures(&mut self) -> RendererResult<()> {
-        let num_texs = self.texture_storage.get_number_of_textures() as u32;
-        if self.number_of_textures < num_texs {
-            let material = self
-                .material_storage
-                .get_material("default")
-                .expect("No \"default\" material");
-            unsafe {
-                self.context
-                    .device
-                    .free_descriptor_sets(self.descriptor_pool, &self.descriptor_sets_texture)
-            }?;
-            let descriptor_layouts_texture = vec![
-                material.pipeline.descriptor_set_layouts[2];
-                self.swapchain.get_actual_image_count() as usize
-            ];
-            let descriptor_counts_texture =
-                vec![num_texs; self.swapchain.get_actual_image_count() as usize];
-            let mut variable_descriptor_allocate_info_texture =
-                vk::DescriptorSetVariableDescriptorCountAllocateInfo::builder()
-                    .descriptor_counts(&descriptor_counts_texture);
-            let descriptor_set_allocate_info_texture = vk::DescriptorSetAllocateInfo::builder()
-                .descriptor_pool(self.descriptor_pool)
-                .set_layouts(&descriptor_layouts_texture)
-                .push_next(&mut variable_descriptor_allocate_info_texture);
-            self.descriptor_sets_texture = unsafe {
-                self.context
-                    .device
-                    .allocate_descriptor_sets(&descriptor_set_allocate_info_texture)?
-            };
-            self.number_of_textures = num_texs;
-        }
-        for ds in self.descriptor_sets_texture.iter() {
-            let image_info = self.texture_storage.get_descriptor_image_info();
-
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&image_info)
-                .build()];
-            unsafe {
-                self.context
-                    .device
-                    .update_descriptor_sets(&desc_sets_write, &[]);
-            }
-        }
-        Ok(())
     }
 
     pub fn add_text(
@@ -787,12 +653,15 @@ impl Renderer {
                 window,
                 &self.context.max_texture_extent,
                 &self.context.device,
+                &mut self.texture_storage,
                 allo,
                 self.buffer_manager.clone(),
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
                 &self.swapchain,
-                &self.material_storage,
+                &mut self.descriptor_layout_cache,
+                &mut self.descriptor_allocator,
+                &mut self.material_system,
             )
         } else {
             panic!("No allocator!");
@@ -1118,10 +987,6 @@ impl Drop for Renderer {
                 .device_wait_idle()
                 .expect("Something wrong while waiting for idle");
 
-            self.context
-                .device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-
             let mut allocator = self.allocator.take().expect("We had no allocator?!");
             for m in &mut self.models {
                 let mut m = m.borrow_mut();
@@ -1149,13 +1014,17 @@ impl Drop for Renderer {
                 .device
                 .destroy_command_pool(self.graphics_command_pool, None);
             // device.destroy_command_pool(command_pool_transfer, None);
-            self.text.destroy(&self.context.device, &mut allocator);
+            self.text.destroy();
             self.context
                 .device
                 .destroy_render_pass(self.render_pass, None);
             let num_images = self.swapchain.get_actual_image_count();
-            self.material_storage.destroy();
+            self.material_system.destroy(&self.context.device);
+            self.shader_cache.destroy(&self.context.device);
             self.swapchain.destroy(&self.context, &mut allocator);
+
+            self.descriptor_layout_cache.destroy(&self.context.device);
+            self.descriptor_allocator.destroy(&self.context.device);
 
             {
                 let mut guard = self.buffer_manager.lock().unwrap();

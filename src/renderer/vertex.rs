@@ -4,6 +4,7 @@ use ash::vk;
 use memoffset::offset_of;
 use nalgebra_glm::{Vec2, Vec3};
 
+use super::material::VertexInputDescription;
 use super::InstanceData;
 
 #[repr(C, packed)]
@@ -129,6 +130,14 @@ impl Vertex {
                 offset: 136u32,
             },
         ]
+    }
+
+    pub fn get_vertex_description() -> VertexInputDescription {
+        VertexInputDescription {
+            bindings: Self::get_binding_description().to_vec(),
+            attributes: Self::get_attribute_descriptions().to_vec(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+        }
     }
 }
 

@@ -108,6 +108,40 @@ impl InternalBuffer {
         Ok(())
     }
 
+    pub fn copy_to_offset<T>(
+        &mut self,
+        allocator: &mut Allocator,
+        data: &[T],
+        offset: usize,
+    ) -> RendererResult<()> {
+        let data_len = data.len() * std::mem::size_of::<T>();
+        if (data_len + offset) > self.size as usize {
+            let (buffer, allocation) = Self::allocate_buffer(
+                &self.device,
+                allocator,
+                (data_len + offset) as u64,
+                self.buffer_usage,
+                self.location,
+            )?;
+            let old_allocation = self.allocation.take().expect("Buffer had no allocation!");
+            unsafe {
+                allocator.free(old_allocation)?;
+                self.device.destroy_buffer(self.buffer, None);
+            }
+            self.buffer = buffer;
+            self.allocation = Some(allocation);
+            self.size = (data_len + offset) as u64;
+        }
+        if let Some(allocation) = &self.allocation {
+            let data_ptr = allocation.mapped_ptr().unwrap().as_ptr() as *mut u8;
+            let data_ptr = unsafe { data_ptr.add(offset) };
+            unsafe { data_ptr.copy_from_nonoverlapping(data.as_ptr() as *const u8, data_len) };
+        } else {
+            panic!("Buffer had no allocation!");
+        }
+        Ok(())
+    }
+
     fn destroy(&mut self, allocator: &mut Allocator) {
         allocator
             .free(self.allocation.take().expect("Buffer had no allocation!"))
@@ -185,6 +219,19 @@ impl BufferManager {
             .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
+    pub fn copy_to_offset_by_handle<T>(
+        &mut self,
+        handle: BufferHandle,
+        allocator: &mut Allocator,
+        data: &[T],
+        offset: usize,
+    ) -> RendererResult<()> {
+        self.handle_array
+            .get_mut(handle.0)
+            .ok_or_else(|| InvalidHandle.into())
+            .and_then(|int_buf| int_buf.copy_to_offset(allocator, data, offset))
+    }
+
     pub fn queue_free(
         &mut self,
         handle: BufferHandle,
@@ -241,6 +288,21 @@ impl Buffer {
             .lock()
             .unwrap()
             .fill_buffer_by_handle(self.handle, allocator, data)
+    }
+
+    pub fn copy_to_offset<T>(
+        &mut self,
+        allocator: &mut Allocator,
+        data: &[T],
+        offset: usize,
+    ) -> RendererResult<()> {
+        if !self.active {
+            panic!("Tried to copy to inactive buffer!");
+        }
+        self.manager
+            .lock()
+            .unwrap()
+            .copy_to_offset_by_handle(self.handle, allocator, data, offset)
     }
 
     pub fn is_active(&self) -> bool {

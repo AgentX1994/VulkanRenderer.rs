@@ -17,7 +17,7 @@ readonly layout (set=1, binding=0) buffer StorageBufferObject {
     vec3 data[];
 } sbo;
 
-layout (set=2, binding=0) uniform sampler2D texture_sampler[];
+layout (set=2, binding=0) uniform sampler2D texture_sampler;
 
 const float PI = 3.14159265358979323846264;
 
@@ -72,13 +72,14 @@ vec3 tone_map(vec3 total_radiance) {
 }
 
 void main() {
+    uint a = texture_id;
     vec3 total_radiance = vec3(0);
     vec3 normal = normalize(normal_varied);
     vec3 direction_to_camera = normalize(camera_pos - worldpos.xyz);
     int num_dir = int(sbo.num_directional);
     int num_point = int(sbo.num_point);
 
-    vec3 surface_color = texture(texture_sampler[texture_id], uv).rgb;
+    vec3 surface_color = texture(texture_sampler, uv).rgb;
 
     for (int i = 0; i < num_dir; i++) {
         vec3 data1 = sbo.data[2*i];

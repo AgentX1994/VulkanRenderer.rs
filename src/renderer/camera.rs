@@ -209,9 +209,10 @@ impl Camera {
         &self,
         allocator: &mut Allocator,
         buffer: &mut Buffer,
+        offset: usize,
     ) -> RendererResult<()> {
         let data_array: [[[f32; 4]; 4]; 2] =
             [self.view_matrix.into(), self.projection_matrix.into()];
-        buffer.fill(allocator, &data_array)
+        buffer.copy_to_offset(allocator, &data_array, offset)
     }
 }

@@ -30,6 +30,7 @@ pub enum RendererError {
     FloatParseError(ParseFloatError),
     IntParseError(ParseIntError),
     SpirvError(&'static str),
+    MissingTemplate(String),
 }
 
 impl fmt::Display for RendererError {
@@ -43,7 +44,8 @@ impl fmt::Display for RendererError {
             RendererError::FontError(ref e) => e.fmt(f),
             RendererError::FloatParseError(ref e) => e.fmt(f),
             RendererError::IntParseError(ref e) => e.fmt(f),
-            RendererError::SpirvError(ref e) => e.fmt(f),
+            RendererError::SpirvError(ref e) => write!(f, "SPIRV Reflection error: {}", e),
+            RendererError::MissingTemplate(ref e) => write!(f, "No such format: {}", e),
         }
     }
 }
@@ -60,6 +62,7 @@ impl error::Error for RendererError {
             RendererError::FloatParseError(ref e) => Some(e),
             RendererError::IntParseError(ref e) => Some(e),
             RendererError::SpirvError(_) => None, // Why spirv_reflect???
+            RendererError::MissingTemplate(_) => None, // Why me???
         }
     }
 }

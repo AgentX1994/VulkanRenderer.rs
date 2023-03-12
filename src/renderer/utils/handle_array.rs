@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use super::super::error::InvalidHandle;
 use super::super::RendererResult;
 
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct Handle(usize);
+pub struct Handle(NonZeroUsize);
 
 pub struct HandleArray<T> {
     handle_to_index: HashMap<Handle, usize>,
@@ -31,7 +32,7 @@ impl<T> Default for HandleArray<T> {
             handle_to_index: HashMap::new(),
             handles: Vec::new(),
             data: Vec::new(),
-            next_handle: Handle(0),
+            next_handle: Handle(NonZeroUsize::new(1).expect("1 == 0??")),
         }
     }
 }
@@ -39,6 +40,21 @@ impl<T> Default for HandleArray<T> {
 impl<T> HandleArray<T> {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.handles.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.handles.is_empty()
+    }
+
+    pub fn clear(&mut self) {
+        self.handle_to_index.clear();
+        self.handles.clear();
+        self.data.clear();
+        self.next_handle = Handle(NonZeroUsize::new(1).expect("1 == 0 ??"));
     }
 
     pub fn get(&self, handle: Handle) -> Option<&T> {
@@ -101,7 +117,11 @@ impl<T> HandleArray<T> {
 
     pub fn insert(&mut self, element: T) -> Handle {
         let handle = self.next_handle;
-        self.next_handle.0 += 1;
+        self.next_handle.0 = self
+            .next_handle
+            .0
+            .checked_add(1)
+            .expect("Handle count wrapped!");
         let index = self.data.len();
         self.data.push(element);
         self.handles.push(handle);
@@ -119,5 +139,13 @@ impl<T> HandleArray<T> {
         } else {
             Err(InvalidHandle.into())
         }
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.data.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
+        self.data.iter_mut()
     }
 }

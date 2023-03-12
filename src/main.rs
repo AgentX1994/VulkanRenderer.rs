@@ -152,7 +152,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
     let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
     let _tex3_index = renderer.new_texture_from_file("plain_white.jpg")?;
-    renderer.update_textures()?;
 
     // Create some text
     renderer.add_text(
@@ -194,9 +193,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .recreate_swapchain(size.width, size.height)
                 .expect("Recreate Swapchain");
             camera.set_aspect(size.width as f32 / size.height as f32);
-            renderer
-                .update_uniforms_from_camera(&camera)
-                .expect("camera buffer update");
             renderer
                 .update_storage_from_lights(&lights)
                 .expect("light update");
@@ -354,10 +350,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if turn_left_pressed {
                 camera.turn_left(turn_speed);
             }
-            renderer
-                .update_uniforms_from_camera(&camera)
-                .expect("Could not update uniform buffer!");
-            let result = renderer.render();
+            let result = renderer.render(&camera);
             match result {
                 Ok(_) => {}
                 Err(RendererError::VulkanError(ash::vk::Result::ERROR_OUT_OF_DATE_KHR)) => {} // Resize request will update swapchain

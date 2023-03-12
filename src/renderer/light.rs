@@ -57,7 +57,7 @@ impl LightManager {
         device: &Device,
         allocator: &mut Allocator,
         buffer: &mut Buffer,
-        descriptor_sets_lights: &mut [vk::DescriptorSet],
+        descriptor_set_lights: vk::DescriptorSet,
     ) -> RendererResult<()> {
         // 0.0s are for padding
         let mut data_vec: Vec<f32> = vec![
@@ -88,21 +88,19 @@ impl LightManager {
             data_vec.push(0.0); // Padding
         }
         buffer.fill(allocator, &data_vec)?;
-        for ds in descriptor_sets_lights {
-            let int_buf = buffer.get_buffer();
-            let buffer_infos = [vk::DescriptorBufferInfo {
-                buffer: int_buf.buffer,
-                offset: 0,
-                range: int_buf.size,
-            }];
-            let desc_sets_write = [vk::WriteDescriptorSet::builder()
-                .dst_set(*ds)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
-                .buffer_info(&buffer_infos)
-                .build()];
-            unsafe { device.update_descriptor_sets(&desc_sets_write, &[]) };
-        }
+        let int_buf = buffer.get_buffer();
+        let buffer_infos = [vk::DescriptorBufferInfo {
+            buffer: int_buf.buffer,
+            offset: 0,
+            range: int_buf.size,
+        }];
+        let desc_sets_write = [vk::WriteDescriptorSet::builder()
+            .dst_set(descriptor_set_lights)
+            .dst_binding(0)
+            .descriptor_type(vk::DescriptorType::STORAGE_BUFFER)
+            .buffer_info(&buffer_infos)
+            .build()];
+        unsafe { device.update_descriptor_sets(&desc_sets_write, &[]) };
 
         Ok(())
     }
