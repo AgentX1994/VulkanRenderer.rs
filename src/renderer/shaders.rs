@@ -305,11 +305,6 @@ impl Default for ShaderEffect {
     }
 }
 
-pub struct ShaderPass {
-    effect: ShaderEffectHandle,
-    pipeline: vk::Pipeline,
-}
-
 #[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct ShaderModuleHandle(Handle);
 
