@@ -49,7 +49,7 @@ impl ShaderModule {
 }
 
 struct ShaderStage {
-    handle: ShaderModuleHandle,
+    handle: Handle<ShaderModule>,
     stage: vk::ShaderStageFlags,
 }
 
@@ -65,9 +65,6 @@ struct DescriptorSetLayoutData {
     create_info: vk::DescriptorSetLayoutCreateInfo,
     bindings: Vec<vk::DescriptorSetLayoutBinding>,
 }
-
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct ShaderEffectHandle(Handle);
 
 pub struct ShaderEffect {
     stages: Vec<ShaderStage>,
@@ -90,7 +87,7 @@ impl ShaderEffect {
 
     pub fn add_stage(
         &mut self,
-        handle: ShaderModuleHandle,
+        handle: Handle<ShaderModule>,
         stage: vk::ShaderStageFlags,
     ) -> RendererResult<()> {
         // TODO reflection stuff
@@ -305,12 +302,9 @@ impl Default for ShaderEffect {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct ShaderModuleHandle(Handle);
-
 pub struct ShaderCache {
     module_handles: HandleArray<ShaderModule>,
-    module_cache: HashMap<String, ShaderModuleHandle>,
+    module_cache: HashMap<String, Handle<ShaderModule>>,
 
     effects_handles: HandleArray<ShaderEffect>,
 }
@@ -325,7 +319,7 @@ impl ShaderCache {
                 device,
                 vk_shader_macros::include_glsl!("./shaders/default.vert", kind: vert).to_vec(),
             )?;
-            let handle = ShaderModuleHandle(module_handles.insert(module));
+            let handle = module_handles.insert(module);
             module_cache.insert("./shaders/default.vert".to_string(), handle);
         }
         {
@@ -333,7 +327,7 @@ impl ShaderCache {
                 device,
                 vk_shader_macros::include_glsl!("./shaders/default.frag", kind: frag).to_vec(),
             )?;
-            let handle = ShaderModuleHandle(module_handles.insert(module));
+            let handle = module_handles.insert(module);
             module_cache.insert("./shaders/default.frag".to_string(), handle);
         }
         {
@@ -341,7 +335,7 @@ impl ShaderCache {
                 device,
                 vk_shader_macros::include_glsl!("./shaders/text.vert", kind: vert).to_vec(),
             )?;
-            let handle = ShaderModuleHandle(module_handles.insert(module));
+            let handle = module_handles.insert(module);
             module_cache.insert("./shaders/text.vert".to_string(), handle);
         }
         {
@@ -349,7 +343,7 @@ impl ShaderCache {
                 device,
                 vk_shader_macros::include_glsl!("./shaders/text.frag", kind: frag).to_vec(),
             )?;
-            let handle = ShaderModuleHandle(module_handles.insert(module));
+            let handle = module_handles.insert(module);
             module_cache.insert("./shaders/text.frag".to_string(), handle);
         }
 
@@ -360,7 +354,10 @@ impl ShaderCache {
         })
     }
 
-    pub fn get_shader_handle<S: AsRef<str>>(&self, path: S) -> RendererResult<ShaderModuleHandle> {
+    pub fn get_shader_handle<S: AsRef<str>>(
+        &self,
+        path: S,
+    ) -> RendererResult<Handle<ShaderModule>> {
         match self.module_cache.get(path.as_ref()) {
             Some(handle) => Ok(*handle),
             None => Err(RendererError::InvalidHandle(InvalidHandle)),
@@ -369,10 +366,10 @@ impl ShaderCache {
 
     pub fn get_shader_module_by_handle(
         &self,
-        handle: ShaderModuleHandle,
+        handle: Handle<ShaderModule>,
     ) -> RendererResult<&ShaderModule> {
         self.module_handles
-            .get(handle.0)
+            .get(handle)
             .ok_or(RendererError::InvalidHandle(InvalidHandle))
     }
 
@@ -381,7 +378,7 @@ impl ShaderCache {
         device: &ash::Device,
         vertex_shader: &str,
         fragment_shader: Option<&str>,
-    ) -> RendererResult<ShaderEffectHandle> {
+    ) -> RendererResult<Handle<ShaderEffect>> {
         let overrides = [("ubo", vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC)];
         let mut effect = ShaderEffect::new();
         effect.add_stage(
@@ -396,15 +393,15 @@ impl ShaderCache {
 
         let handle = self.effects_handles.insert(effect);
 
-        Ok(ShaderEffectHandle(handle))
+        Ok(handle)
     }
 
     pub fn get_shader_effect_by_handle(
         &self,
-        handle: ShaderEffectHandle,
+        handle: Handle<ShaderEffect>,
     ) -> RendererResult<&ShaderEffect> {
         self.effects_handles
-            .get(handle.0)
+            .get(handle)
             .ok_or(RendererError::InvalidHandle(InvalidHandle))
     }
 

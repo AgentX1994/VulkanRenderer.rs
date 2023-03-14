@@ -1,18 +1,60 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 
 use super::super::error::InvalidHandle;
 use super::super::RendererResult;
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct Handle(NonZeroUsize);
+pub struct Handle<T>(NonZeroUsize, PhantomData<*const T>);
+
+// I Feel like there has got to be a better way to do this than
+// manually implementing all of these traits
+impl<T> fmt::Debug for Handle<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Handle").field(&self.0).finish()
+    }
+}
+
+impl<T: Ord> Ord for Handle<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.partial_cmp(other).unwrap()
+    }
+}
+
+impl<T> PartialOrd for Handle<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+impl<T> Copy for Handle<T> {}
+
+impl<T> Eq for Handle<T> {}
+
+impl<T> PartialEq for Handle<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> std::hash::Hash for Handle<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<T> Clone for Handle<T> {
+    fn clone(&self) -> Self {
+        Self(self.0, PhantomData)
+    }
+}
 
 pub struct HandleArray<T> {
-    handle_to_index: HashMap<Handle, usize>,
-    handles: Vec<Handle>,
+    handle_to_index: HashMap<Handle<T>, usize>,
+    handles: Vec<Handle<T>>,
     data: Vec<T>,
-    next_handle: Handle,
+    next_handle: Handle<T>,
 }
 
 impl<T: fmt::Debug> fmt::Debug for HandleArray<T> {
@@ -32,7 +74,7 @@ impl<T> Default for HandleArray<T> {
             handle_to_index: HashMap::new(),
             handles: Vec::new(),
             data: Vec::new(),
-            next_handle: Handle(NonZeroUsize::new(1).expect("1 == 0??")),
+            next_handle: Handle(NonZeroUsize::new(1).expect("1 == 0??"), PhantomData),
         }
     }
 }
@@ -54,10 +96,10 @@ impl<T> HandleArray<T> {
         self.handle_to_index.clear();
         self.handles.clear();
         self.data.clear();
-        self.next_handle = Handle(NonZeroUsize::new(1).expect("1 == 0 ??"));
+        self.next_handle = Handle(NonZeroUsize::new(1).expect("1 == 0 ??"), PhantomData);
     }
 
-    pub fn get(&self, handle: Handle) -> Option<&T> {
+    pub fn get(&self, handle: Handle<T>) -> Option<&T> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             self.data.get(index)
         } else {
@@ -65,7 +107,7 @@ impl<T> HandleArray<T> {
         }
     }
 
-    pub fn get_mut(&mut self, handle: Handle) -> Option<&mut T> {
+    pub fn get_mut(&mut self, handle: Handle<T>) -> Option<&mut T> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             self.data.get_mut(index)
         } else {
@@ -73,7 +115,7 @@ impl<T> HandleArray<T> {
         }
     }
 
-    pub fn get_index(&self, handle: Handle) -> Option<usize> {
+    pub fn get_index(&self, handle: Handle<T>) -> Option<usize> {
         self.handle_to_index.get(&handle).copied()
     }
 
@@ -83,8 +125,8 @@ impl<T> HandleArray<T> {
 
     pub fn swap_by_handle(
         &mut self,
-        handle1: Handle,
-        handle2: Handle,
+        handle1: Handle<T>,
+        handle2: Handle<T>,
     ) -> Result<(), InvalidHandle> {
         if handle1 == handle2 {
             return Ok(());
@@ -115,7 +157,7 @@ impl<T> HandleArray<T> {
         self.handle_to_index.insert(handle1, index2);
     }
 
-    pub fn insert(&mut self, element: T) -> Handle {
+    pub fn insert(&mut self, element: T) -> Handle<T> {
         let handle = self.next_handle;
         self.next_handle.0 = self
             .next_handle
@@ -129,7 +171,7 @@ impl<T> HandleArray<T> {
         handle
     }
 
-    pub fn remove(&mut self, handle: Handle) -> RendererResult<T> {
+    pub fn remove(&mut self, handle: Handle<T>) -> RendererResult<T> {
         if let Some(&index) = self.handle_to_index.get(&handle) {
             self.swap_by_index(index, self.data.len() - 1);
             self.handles.pop();

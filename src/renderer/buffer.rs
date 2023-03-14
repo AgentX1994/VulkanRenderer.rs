@@ -9,9 +9,6 @@ use super::error::InvalidHandle;
 use super::utils::{Handle, HandleArray};
 use super::RendererResult;
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct BufferHandle(Handle);
-
 struct InternalBuffer {
     device: ash::Device,
     allocation: Option<Allocation>,
@@ -173,9 +170,9 @@ impl BufferManager {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
-    ) -> RendererResult<BufferHandle> {
+    ) -> RendererResult<Handle<InternalBuffer>> {
         let internal_buffer = InternalBuffer::new(device, allocator, size, buffer_usage, location)?;
-        Ok(BufferHandle(self.handle_array.insert(internal_buffer)))
+        Ok(self.handle_array.insert(internal_buffer))
     }
 
     pub fn new_buffer(
@@ -201,43 +198,41 @@ impl BufferManager {
         Ok(buffer)
     }
 
-    pub fn get_buffer(&self, handle: BufferHandle) -> Option<BufferDetails> {
-        self.handle_array
-            .get(handle.0)
-            .map(|int_buf| int_buf.into())
+    fn get_buffer(&self, handle: Handle<InternalBuffer>) -> Option<BufferDetails> {
+        self.handle_array.get(handle).map(|int_buf| int_buf.into())
     }
 
-    pub fn fill_buffer_by_handle<T>(
+    fn fill_buffer_by_handle<T>(
         &mut self,
-        handle: BufferHandle,
+        handle: Handle<InternalBuffer>,
         allocator: &mut Allocator,
         data: &[T],
     ) -> RendererResult<()> {
         self.handle_array
-            .get_mut(handle.0)
+            .get_mut(handle)
             .ok_or_else(|| InvalidHandle.into())
             .and_then(|int_buf| int_buf.fill(allocator, data))
     }
 
-    pub fn copy_to_offset_by_handle<T>(
+    fn copy_to_offset_by_handle<T>(
         &mut self,
-        handle: BufferHandle,
+        handle: Handle<InternalBuffer>,
         allocator: &mut Allocator,
         data: &[T],
         offset: usize,
     ) -> RendererResult<()> {
         self.handle_array
-            .get_mut(handle.0)
+            .get_mut(handle)
             .ok_or_else(|| InvalidHandle.into())
             .and_then(|int_buf| int_buf.copy_to_offset(allocator, data, offset))
     }
 
-    pub fn queue_free(
+    fn queue_free(
         &mut self,
-        handle: BufferHandle,
+        handle: Handle<InternalBuffer>,
         last_frame_index: Option<u32>,
     ) -> RendererResult<()> {
-        let int_buf = self.handle_array.remove(handle.0)?;
+        let int_buf = self.handle_array.remove(handle)?;
         self.to_free.push((int_buf, last_frame_index));
         Ok(())
     }
@@ -275,7 +270,7 @@ impl From<&InternalBuffer> for BufferDetails {
 #[derive(Debug)]
 pub struct Buffer {
     manager: Arc<Mutex<BufferManager>>,
-    handle: BufferHandle,
+    handle: Handle<InternalBuffer>,
     active: bool,
 }
 

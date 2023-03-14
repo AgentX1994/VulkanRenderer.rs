@@ -9,9 +9,9 @@ use ash::vk;
 use super::{
     descriptor::{DescriptorAllocator, DescriptorBuilder, DescriptorLayoutCache},
     error::{InvalidHandle, RendererError},
-    shaders::{ShaderCache, ShaderEffect, ShaderEffectHandle},
+    shaders::{ShaderCache, ShaderEffect},
     text::TextVertexData,
-    texture::{TextureHandle, TextureStorage},
+    texture::{Texture, TextureStorage},
     utils::{Handle, HandleArray},
     vertex::Vertex,
     RendererResult,
@@ -31,9 +31,6 @@ pub enum TransparencyMode {
     Transparent,
     Masked,
 }
-
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct EffectTemplateHandle(Handle);
 
 // TODO move this
 #[derive(Clone, Default)]
@@ -173,7 +170,7 @@ impl ComputePipelineBuilder {
 
 #[derive(Default)]
 pub struct BuiltShaderPass {
-    pub effect_handle: Option<ShaderEffectHandle>,
+    pub effect_handle: Option<Handle<ShaderEffect>>,
     pub pipeline: vk::Pipeline,
     pub layout: vk::PipelineLayout,
 }
@@ -236,7 +233,7 @@ impl EffectTemplate {
 
 #[derive(Clone)]
 pub struct MaterialData {
-    pub textures: Vec<TextureHandle>,
+    pub textures: Vec<Handle<Texture>>,
     pub parameters: ShaderParameters,
     pub base_template: String,
 }
@@ -270,13 +267,10 @@ impl Hash for MaterialData {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct MaterialHandle(Handle);
-
 pub struct Material {
-    pub original: EffectTemplateHandle,
+    pub original: Handle<EffectTemplate>,
     pub pass_sets: BuiltPerPassData<vk::DescriptorSet>,
-    pub textures: Vec<TextureHandle>,
+    pub textures: Vec<Handle<Texture>>,
     pub parameters: ShaderParameters,
 }
 
@@ -285,7 +279,7 @@ fn build_shader_pass(
     render_pass: vk::RenderPass,
     shader_cache: &ShaderCache,
     builder: &PipelineBuilder,
-    effect_handle: ShaderEffectHandle,
+    effect_handle: Handle<ShaderEffect>,
 ) -> RendererResult<BuiltShaderPass> {
     let effect = shader_cache.get_shader_effect_by_handle(effect_handle)?;
     let layout = effect.pipeline_layout;
@@ -305,11 +299,11 @@ pub struct MaterialSystem {
     shadow_builder: PipelineBuilder,
 
     effect_template_handles: HandleArray<EffectTemplate>,
-    template_cache: HashMap<String, EffectTemplateHandle>,
+    template_cache: HashMap<String, Handle<EffectTemplate>>,
 
     materials_handles: HandleArray<Material>,
-    materials: HashMap<String, MaterialHandle>,
-    material_cache: HashMap<MaterialData, MaterialHandle>,
+    materials: HashMap<String, Handle<Material>>,
+    material_cache: HashMap<MaterialData, Handle<Material>>,
 }
 
 impl MaterialSystem {
@@ -376,8 +370,7 @@ impl MaterialSystem {
 
             default_template.pass_shaders[MeshPassType::Forward] = default_pass;
             let handle = self.effect_template_handles.insert(default_template);
-            self.template_cache
-                .insert("default".to_string(), EffectTemplateHandle(handle));
+            self.template_cache.insert("default".to_string(), handle);
         }
 
         {
@@ -389,8 +382,7 @@ impl MaterialSystem {
 
             text_template.pass_shaders[MeshPassType::Forward] = text_pass;
             let handle = self.effect_template_handles.insert(text_template);
-            self.template_cache
-                .insert("text".to_string(), EffectTemplateHandle(handle));
+            self.template_cache.insert("text".to_string(), handle);
         }
 
         Ok(())
@@ -404,7 +396,7 @@ impl MaterialSystem {
         descriptor_allocator: &mut DescriptorAllocator,
         material_name: &str,
         info: MaterialData,
-    ) -> RendererResult<MaterialHandle> {
+    ) -> RendererResult<Handle<Material>> {
         match self.material_cache.entry(info) {
             std::collections::hash_map::Entry::Occupied(o) => Ok(*o.get()),
             std::collections::hash_map::Entry::Vacant(v) => {
@@ -451,10 +443,8 @@ impl MaterialSystem {
                 new_mat.pass_sets[MeshPassType::Forward] = db.build(device)?.0;
 
                 let handle = self.materials_handles.insert(new_mat);
-                let material_handle = MaterialHandle(handle);
-                self.materials
-                    .insert(material_name.to_string(), material_handle);
-                Ok(*v.insert(material_handle))
+                self.materials.insert(material_name.to_string(), handle);
+                Ok(*v.insert(handle))
             }
         }
     }
@@ -462,23 +452,23 @@ impl MaterialSystem {
     pub fn get_material_handle<S: AsRef<str>>(
         &self,
         material_name: S,
-    ) -> RendererResult<MaterialHandle> {
+    ) -> RendererResult<Handle<Material>> {
         match self.materials.get(material_name.as_ref()) {
             Some(handle) => Ok(*handle),
             None => Err(RendererError::InvalidHandle(InvalidHandle)),
         }
     }
 
-    pub fn get_material_by_handle(&self, handle: MaterialHandle) -> RendererResult<&Material> {
+    pub fn get_material_by_handle(&self, handle: Handle<Material>) -> RendererResult<&Material> {
         self.materials_handles
-            .get(handle.0)
+            .get(handle)
             .ok_or(RendererError::InvalidHandle(InvalidHandle))
     }
 
     pub fn get_effect_template_handle<S: AsRef<str>>(
         &self,
         template_name: S,
-    ) -> RendererResult<EffectTemplateHandle> {
+    ) -> RendererResult<Handle<EffectTemplate>> {
         match self.template_cache.get(template_name.as_ref()) {
             Some(handle) => Ok(*handle),
             None => Err(RendererError::InvalidHandle(InvalidHandle)),
@@ -487,10 +477,10 @@ impl MaterialSystem {
 
     pub fn get_effect_template_by_handle(
         &self,
-        handle: EffectTemplateHandle,
+        handle: Handle<EffectTemplate>,
     ) -> RendererResult<&EffectTemplate> {
         self.effect_template_handles
-            .get(handle.0)
+            .get(handle)
             .ok_or(RendererError::InvalidHandle(InvalidHandle))
     }
 

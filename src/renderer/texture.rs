@@ -12,9 +12,6 @@ use super::{
     RendererResult,
 };
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct TextureHandle(Handle);
-
 pub struct Texture {
     vk_image: vk::Image,
     pub image_view: vk::ImageView,
@@ -439,11 +436,11 @@ impl TextureStorage {
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: vk::CommandPool,
         queue: vk::Queue,
-    ) -> RendererResult<TextureHandle> {
+    ) -> RendererResult<Handle<Texture>> {
         let texture =
             Texture::from_file(path, device, allocator, buffer_manager, command_pool, queue)?;
         let handle = self.textures.insert(texture);
-        Ok(TextureHandle(handle))
+        Ok(handle)
     }
 
     pub fn new_texture_from_u8(
@@ -456,7 +453,7 @@ impl TextureStorage {
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-    ) -> RendererResult<TextureHandle> {
+    ) -> RendererResult<Handle<Texture>> {
         let texture = Texture::from_u8s(
             data,
             width,
@@ -468,19 +465,19 @@ impl TextureStorage {
             queue,
         )?;
         let handle = self.textures.insert(texture);
-        Ok(TextureHandle(handle))
+        Ok(handle)
     }
 
     pub fn get_number_of_textures(&self) -> usize {
         self.textures.len()
     }
 
-    pub fn get_texture(&self, handle: TextureHandle) -> Option<&Texture> {
-        self.textures.get(handle.0)
+    pub fn get_texture(&self, handle: Handle<Texture>) -> Option<&Texture> {
+        self.textures.get(handle)
     }
 
-    pub fn get_texture_mut(&mut self, handle: TextureHandle) -> Option<&mut Texture> {
-        self.textures.get_mut(handle.0)
+    pub fn get_texture_mut(&mut self, handle: Handle<Texture>) -> Option<&mut Texture> {
+        self.textures.get_mut(handle)
     }
 
     pub fn get_descriptor_image_info(&self) -> Vec<vk::DescriptorImageInfo> {

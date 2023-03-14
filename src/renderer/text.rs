@@ -9,15 +9,18 @@ use gpu_allocator::vulkan::Allocator;
 use gpu_allocator::MemoryLocation;
 use memoffset::offset_of;
 
-use super::material::VertexInputDescription;
-use super::swapchain::Swapchain;
-use super::RendererResult;
 use super::{
     buffer::{Buffer, BufferManager},
     descriptor::{DescriptorAllocator, DescriptorLayoutCache},
     error::{InvalidHandle, RendererError},
-    material::{MaterialData, MaterialHandle, MaterialSystem, MeshPassType, ShaderParameters},
-    texture::{TextureHandle, TextureStorage},
+    material::{
+        Material, MaterialData, MaterialSystem, MeshPassType, ShaderParameters,
+        VertexInputDescription,
+    },
+    swapchain::Swapchain,
+    texture::{Texture, TextureStorage},
+    utils::Handle,
+    RendererResult,
 };
 
 struct CharacterData {
@@ -36,9 +39,9 @@ struct CharacterData {
 struct TextAtlasTexture {
     width: f32,
     height: f32,
-    texture_handle: TextureHandle,
+    texture_handle: Handle<Texture>,
     char_data: HashMap<u16, CharacterData>,
-    material_handle: Option<MaterialHandle>,
+    material_handle: Option<Handle<Material>>,
 }
 
 impl TextAtlasTexture {

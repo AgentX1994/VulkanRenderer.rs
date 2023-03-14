@@ -41,8 +41,8 @@ use self::light::LightManager;
 use self::material::{MaterialData, MaterialSystem, MeshPassType, ShaderParameters};
 use self::shaders::ShaderCache;
 use self::text::TextHandler;
-use self::texture::{TextureHandle, TextureStorage};
-use self::utils::InternalWindow;
+use self::texture::{Texture, TextureStorage};
+use self::utils::{Handle, InternalWindow};
 
 pub use error::RendererResult;
 
@@ -623,7 +623,7 @@ impl Renderer {
     pub fn new_texture_from_file<P: AsRef<Path>>(
         &mut self,
         path: P,
-    ) -> RendererResult<TextureHandle> {
+    ) -> RendererResult<Handle<Texture>> {
         if let Some(allo) = &mut self.allocator {
             Ok(self.texture_storage.new_texture_from_file(
                 path,

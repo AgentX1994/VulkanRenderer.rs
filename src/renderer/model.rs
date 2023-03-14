@@ -18,9 +18,6 @@ use super::{InstanceData, RendererResult};
 
 pub mod loaders;
 
-#[derive(Copy, Clone, Debug, PartialOrd, Ord, PartialEq, Eq, Hash)]
-pub struct ModelHandle(Handle);
-
 pub struct Model<V, I> {
     vertex_data: Vec<V>,
     index_data: Vec<u32>,
@@ -250,24 +247,24 @@ impl<V, I> Model<V, I> {
         model
     }
 
-    pub fn get(&self, handle: ModelHandle) -> Option<&I> {
-        self.handle_array.get(handle.0)
+    pub fn get(&self, handle: Handle<I>) -> Option<&I> {
+        self.handle_array.get(handle)
     }
 
-    pub fn get_mut(&mut self, handle: ModelHandle) -> Option<&mut I> {
-        self.handle_array.get_mut(handle.0)
+    pub fn get_mut(&mut self, handle: Handle<I>) -> Option<&mut I> {
+        self.handle_array.get_mut(handle)
     }
 
-    fn is_visible(&self, handle: ModelHandle) -> Result<bool, InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle.0) {
+    fn is_visible(&self, handle: Handle<I>) -> Result<bool, InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle) {
             Ok(index < self.first_invisible)
         } else {
             Err(InvalidHandle)
         }
     }
 
-    fn make_visible(&mut self, handle: ModelHandle) -> Result<(), InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle.0) {
+    fn make_visible(&mut self, handle: Handle<I>) -> Result<(), InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle) {
             if index < self.first_invisible {
                 return Ok(());
             }
@@ -279,8 +276,8 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    fn make_invisible(&mut self, handle: ModelHandle) -> Result<(), InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle.0) {
+    fn make_invisible(&mut self, handle: Handle<I>) -> Result<(), InvalidHandle> {
+        if let Some(index) = self.handle_array.get_index(handle) {
             if index >= self.first_invisible {
                 return Ok(());
             }
@@ -293,25 +290,25 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    pub fn insert(&mut self, element: I) -> ModelHandle {
-        ModelHandle(self.handle_array.insert(element))
+    pub fn insert(&mut self, element: I) -> Handle<I> {
+        self.handle_array.insert(element)
     }
 
-    pub fn insert_visibly(&mut self, element: I) -> ModelHandle {
+    pub fn insert_visibly(&mut self, element: I) -> Handle<I> {
         let new_handle = self.insert(element);
         // We just inserted this element, we know it exists
         self.make_visible(new_handle).unwrap();
         new_handle
     }
 
-    pub fn update(&mut self, handle: ModelHandle, element: I) -> RendererResult<()> {
-        let elem = self.handle_array.get_mut(handle.0).ok_or(InvalidHandle)?;
+    pub fn update(&mut self, handle: Handle<I>, element: I) -> RendererResult<()> {
+        let elem = self.handle_array.get_mut(handle).ok_or(InvalidHandle)?;
         *elem = element;
         Ok(())
     }
 
-    pub fn remove(&mut self, handle: ModelHandle) -> RendererResult<I> {
-        self.handle_array.remove(handle.0)
+    pub fn remove(&mut self, handle: Handle<I>) -> RendererResult<I> {
+        self.handle_array.remove(handle)
     }
 
     pub fn update_vertex_buffer(
