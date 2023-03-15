@@ -237,7 +237,7 @@ impl<'a> DescriptorBuilder<'a> {
     pub fn bind_buffer(
         &mut self,
         binding: u32,
-        buffer_info: vk::DescriptorBufferInfo,
+        buffer_info: &[vk::DescriptorBufferInfo],
         ty: vk::DescriptorType,
         stage_flags: vk::ShaderStageFlags,
     ) -> &mut Self {
@@ -250,7 +250,7 @@ impl<'a> DescriptorBuilder<'a> {
         self.bindings.push(new_binding);
 
         let new_write = vk::WriteDescriptorSet::builder()
-            .buffer_info(&[buffer_info])
+            .buffer_info(buffer_info)
             .descriptor_type(ty)
             .dst_binding(binding)
             .build();

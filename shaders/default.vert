@@ -5,9 +5,6 @@ layout (location=1) in vec3 normal;
 layout (location=2) in vec2 uv;
 layout (location=3) in mat4 model_matrix;
 layout (location=7) in mat4 inverse_model_matrix;
-layout (location=11) in float metallic_in;
-layout (location=12) in float roughness_in;
-layout (location=13) in uint texture_id_in;
 
 layout (set=0, binding=0) uniform UniformBufferObject {
     mat4 view_matrix;
@@ -17,10 +14,7 @@ layout (set=0, binding=0) uniform UniformBufferObject {
 layout (location=0) out vec3 out_normal;
 layout (location=1) out vec4 worldpos;
 layout (location=2) out vec3 camera_pos;
-layout (location=3) out float metallic;
-layout (location=4) out float roughness;
-layout (location=5) out vec2 uv_out;
-layout (location=6) flat out uint texture_id;
+layout (location=3) out vec2 uv_out;
 
 void main() {
     worldpos = model_matrix*vec4(position, 1.0);
@@ -31,8 +25,5 @@ void main() {
 	- ubo.view_matrix[3][2] * vec3 (ubo.view_matrix[0][2],ubo.view_matrix[1][2],ubo.view_matrix[2][2]);
 
     out_normal = vec3(transpose(inverse_model_matrix)*vec4(normalize(normal), 0.0));
-    metallic = metallic_in;
-    roughness = roughness_in;
     uv_out = uv;
-    texture_id = texture_id_in;
 }

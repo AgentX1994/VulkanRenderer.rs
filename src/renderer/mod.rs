@@ -72,19 +72,13 @@ impl Drop for FrameData {
 pub struct InstanceData {
     pub model_matrix: [[f32; 4]; 4],
     pub inverse_model_matrix: [[f32; 4]; 4],
-    pub metallic: f32,
-    pub roughness: f32,
-    pub texture_id: u32,
 }
 
 impl InstanceData {
-    pub fn new(model: glm::Mat4, metallic: f32, roughness: f32, texture_id: u32) -> Self {
+    pub fn new(model: glm::Mat4) -> Self {
         InstanceData {
             model_matrix: model.into(),
             inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
-            metallic,
-            roughness,
-            texture_id,
         }
     }
 }
@@ -110,7 +104,7 @@ pub struct Renderer {
     descriptor_set_lights: vk::DescriptorSet,
     light_buffer: Buffer,
     texture_storage: TextureStorage,
-    number_of_textures: u32,
+    uniform_buffer_2: Buffer,
     pub text: TextHandler,
     pub models: Vec<Rc<RefCell<Model<Vertex, InstanceData>>>>,
 }
@@ -311,14 +305,26 @@ impl Renderer {
             graphics_command_pool,
             context.graphics_queue.queue,
         )?;
+        let mut buffer = BufferManager::new_buffer(
+            buffer_manager.clone(),
+            &context.device,
+            &mut allocator,
+            2 * 4,
+            vk::BufferUsageFlags::UNIFORM_BUFFER,
+            MemoryLocation::CpuToGpu,
+        )?;
+        let material_data = [0.5f32, 0.5f32];
+        buffer.fill(&mut allocator, &material_data)?;
         let default_material_data = MaterialData {
             textures: vec![texture_handle],
-            parameters: ShaderParameters {},
+            buffers: vec![buffer.get_handle()],
+            parameters: ShaderParameters::default(),
             base_template: "default".to_string(),
         };
         let material_handle = material_system.build_material(
             &context.device,
             &texture_storage,
+            buffer_manager.clone(),
             &mut descriptor_layout_cache,
             &mut descriptor_allocator,
             "default",
@@ -373,7 +379,7 @@ impl Renderer {
             descriptor_set_lights,
             light_buffer,
             texture_storage,
-            number_of_textures: 0,
+            uniform_buffer_2: buffer,
             text,
             models: vec![],
         })
@@ -1004,6 +1010,9 @@ impl Drop for Renderer {
                 .queue_free(None)
                 .expect("Invalid Handle?!");
             self.light_buffer
+                .queue_free(None)
+                .expect("Invalid Handle?!");
+            self.uniform_buffer_2
                 .queue_free(None)
                 .expect("Invalid Handle?!");
             self.texture_storage

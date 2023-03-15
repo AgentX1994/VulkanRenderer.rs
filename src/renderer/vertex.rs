@@ -43,7 +43,7 @@ impl Vertex {
         ]
     }
 
-    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 14] {
+    pub fn get_attribute_descriptions() -> [vk::VertexInputAttributeDescription; 11] {
         [
             vk::VertexInputAttributeDescription {
                 location: 0,
@@ -110,24 +110,6 @@ impl Vertex {
                 binding: 1,
                 format: vk::Format::R32G32B32A32_SFLOAT,
                 offset: 112u32,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 11,
-                binding: 1,
-                format: vk::Format::R32_SFLOAT,
-                offset: 128u32,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 12,
-                binding: 1,
-                format: vk::Format::R32_SFLOAT,
-                offset: 132u32,
-            },
-            vk::VertexInputAttributeDescription {
-                location: 13,
-                binding: 1,
-                format: vk::Format::R8_UINT,
-                offset: 136u32,
             },
         ]
     }

@@ -279,7 +279,7 @@ impl TextHandler {
             device,
             texture_storage,
             allocator,
-            buffer_manager,
+            buffer_manager.clone(),
             command_pool,
             queue,
         )?;
@@ -287,13 +287,15 @@ impl TextHandler {
         // Create new material for this atlas
         let mat_data = MaterialData {
             base_template: "text".to_string(),
+            buffers: vec![],
             textures: vec![atlas.texture_handle],
-            parameters: ShaderParameters {},
+            parameters: ShaderParameters::default(),
         };
 
         let handle = material_system.build_material(
             device,
             texture_storage,
+            buffer_manager,
             descriptor_layout_cache,
             descriptor_allocator,
             &format!("{} {}px", self.font_name, px),

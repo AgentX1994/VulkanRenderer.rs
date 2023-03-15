@@ -12,11 +12,6 @@ pub struct SceneObject {
     pub rotation: glm::Quat,
     pub scaling: glm::Vec3,
 
-    // TODO move these to a material properties section
-    pub metallic: f32,
-    pub roughness: f32,
-    pub texture_id: u32,
-
     transform_dirty: bool,
     transform: glm::Mat4,
     global_transform: glm::Mat4,
@@ -33,9 +28,6 @@ impl SceneObject {
             position: glm::Vec3::default(),
             rotation: glm::Quat::identity(),
             scaling: glm::Vec3::new(1.0, 1.0, 1.0),
-            metallic: 0.0,
-            roughness: 0.0,
-            texture_id: 0,
             transform_dirty: Default::default(),
             transform: glm::Mat4::identity(),
             global_transform: glm::Mat4::identity(),
@@ -49,12 +41,7 @@ impl SceneObject {
             self.update_transform(false)?;
         }
         if let Some(model) = &self.model {
-            let instance_data = InstanceData::new(
-                self.global_transform,
-                self.metallic,
-                self.roughness,
-                self.texture_id,
-            );
+            let instance_data = InstanceData::new(self.global_transform);
             if let Some(id) = &self.instance_id {
                 model.borrow_mut().update(*id, instance_data)?;
             } else {

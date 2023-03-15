@@ -45,9 +45,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut obj_ref = new_object.borrow_mut();
                 obj_ref.position = translation;
                 obj_ref.scaling = glm::Vec3::new(scale, scale, scale);
-                obj_ref.metallic = metallic;
-                obj_ref.roughness = roughness;
-                obj_ref.texture_id = texture_id;
                 obj_ref.set_model(&sphere)?;
                 obj_ref.update_transform(true)?;
             }
@@ -86,10 +83,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::f32::consts::FRAC_2_PI,
                 na::Unit::<glm::Vec3>::new_normalize(glm::Vec3::new(1.0f32, 0.0f32, 0.0f32)),
             );
-            obj_ref.metallic = 0.5f32;
-            obj_ref.roughness = 0.1f32;
-            // TODO: need a way to specify materials
-            obj_ref.texture_id = 3;
             obj_ref.set_model(&car_model)?;
             obj_ref.update_transform(true)?;
         }

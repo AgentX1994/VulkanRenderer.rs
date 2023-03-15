@@ -4,10 +4,7 @@
 layout (location=0) in vec3 normal_varied;
 layout (location=1) in vec4 worldpos;
 layout (location=2) in vec3 camera_pos;
-layout (location=3) in float metallic_in;
-layout (location=4) in float roughness_in;
-layout (location=5) in vec2 uv;
-layout (location=6) flat in uint texture_id;
+layout (location=3) in vec2 uv;
 
 layout (location=0) out vec4 outColor;
 
@@ -18,6 +15,11 @@ readonly layout (set=1, binding=0) buffer StorageBufferObject {
 } sbo;
 
 layout (set=2, binding=0) uniform sampler2D texture_sampler;
+
+layout (set=2, binding=1) uniform MaterialParameters {
+    float metallic;
+    float roughness;
+} material_parameters;
 
 const float PI = 3.14159265358979323846264;
 
@@ -72,7 +74,6 @@ vec3 tone_map(vec3 total_radiance) {
 }
 
 void main() {
-    uint a = texture_id;
     vec3 total_radiance = vec3(0);
     vec3 normal = normalize(normal_varied);
     vec3 direction_to_camera = normalize(camera_pos - worldpos.xyz);
@@ -92,8 +93,8 @@ void main() {
             normal,
             direction_to_camera,
             surface_color,
-            metallic_in,
-            roughness_in);
+            material_parameters.metallic,
+            material_parameters.roughness);
     }
 
     for (int i = 0; i < num_point; i++) {
@@ -111,8 +112,8 @@ void main() {
             normal,
             direction_to_camera,
             surface_color,
-            metallic_in,
-            roughness_in);
+            material_parameters.metallic,
+            material_parameters.roughness);
     }
 
     outColor = vec4(tone_map(total_radiance), 1);

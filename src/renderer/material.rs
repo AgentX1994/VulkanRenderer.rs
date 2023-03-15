@@ -2,11 +2,14 @@ use std::{
     collections::HashMap,
     hash::Hash,
     ops::{Index, IndexMut},
+    sync::{Arc, Mutex},
 };
 
 use ash::vk;
+use itertools::Itertools;
 
 use super::{
+    buffer::{BufferManager, InternalBuffer},
     descriptor::{DescriptorAllocator, DescriptorBuilder, DescriptorLayoutCache},
     error::{InvalidHandle, RendererError},
     shaders::{ShaderCache, ShaderEffect},
@@ -211,8 +214,19 @@ impl<T> IndexMut<MeshPassType> for BuiltPerPassData<T> {
     }
 }
 
-#[derive(Default, Clone, Copy, Hash, PartialEq)]
-pub struct ShaderParameters {}
+#[derive(Default, Clone, PartialEq)]
+pub struct ShaderParameters {
+    parameters: HashMap<String, f32>, // TODO support more parameter types
+}
+
+impl Hash for ShaderParameters {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for (k, v) in self.parameters.iter().sorted_by_key(|p| p.0) {
+            k.hash(state);
+            v.to_be_bytes().hash(state);
+        }
+    }
+}
 
 pub struct EffectTemplate {
     pub pass_shaders: BuiltPerPassData<BuiltShaderPass>,
@@ -234,6 +248,7 @@ impl EffectTemplate {
 #[derive(Clone)]
 pub struct MaterialData {
     pub textures: Vec<Handle<Texture>>,
+    pub buffers: Vec<Handle<InternalBuffer>>,
     pub parameters: ShaderParameters,
     pub base_template: String,
 }
@@ -243,13 +258,23 @@ impl PartialEq for MaterialData {
         if self.base_template != other.base_template
             || self.parameters != other.parameters
             || self.textures.len() != other.textures.len()
+            || self.buffers.len() != other.buffers.len()
         {
             return false;
         }
-        !self
+        if self
             .textures
             .iter()
             .zip(other.textures.iter())
+            .any(|(a, b)| a != b)
+        {
+            return false;
+        }
+
+        !self
+            .buffers
+            .iter()
+            .zip(other.buffers.iter())
             .any(|(a, b)| a != b)
     }
 }
@@ -263,6 +288,11 @@ impl Hash for MaterialData {
         for tex in self.textures.iter() {
             tex.hash(state);
         }
+
+        for buffer in self.buffers.iter() {
+            buffer.hash(state);
+        }
+
         self.parameters.hash(state);
     }
 }
@@ -364,7 +394,7 @@ impl MaterialSystem {
         {
             let mut default_template = EffectTemplate {
                 pass_shaders: Default::default(),
-                default_parameters: ShaderParameters {},
+                default_parameters: ShaderParameters::default(),
                 transparency_mode: TransparencyMode::Opaque,
             };
 
@@ -376,7 +406,7 @@ impl MaterialSystem {
         {
             let mut text_template = EffectTemplate {
                 pass_shaders: Default::default(),
-                default_parameters: ShaderParameters {},
+                default_parameters: ShaderParameters::default(),
                 transparency_mode: TransparencyMode::Opaque,
             };
 
@@ -392,13 +422,17 @@ impl MaterialSystem {
         &mut self,
         device: &ash::Device,
         texture_storage: &TextureStorage,
+        buffer_manager: Arc<Mutex<BufferManager>>,
         descriptor_layout_cache: &mut DescriptorLayoutCache,
         descriptor_allocator: &mut DescriptorAllocator,
         material_name: &str,
         info: MaterialData,
     ) -> RendererResult<Handle<Material>> {
         match self.material_cache.entry(info) {
-            std::collections::hash_map::Entry::Occupied(o) => Ok(*o.get()),
+            std::collections::hash_map::Entry::Occupied(o) => {
+                self.materials.insert(material_name.to_string(), *o.get());
+                Ok(*o.get())
+            }
             std::collections::hash_map::Entry::Vacant(v) => {
                 let info = v.key();
                 let original = {
@@ -414,7 +448,7 @@ impl MaterialSystem {
                     original,
                     pass_sets: Default::default(),
                     textures: info.textures.clone(),
-                    parameters: info.parameters,
+                    parameters: info.parameters.clone(),
                 };
 
                 let mut db =
@@ -436,6 +470,24 @@ impl MaterialSystem {
                         i as u32,
                         image_infos.last().unwrap(),
                         vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                        vk::ShaderStageFlags::FRAGMENT,
+                    );
+                }
+                let mut buffer_infos = vec![];
+                buffer_infos.reserve(info.buffers.len());
+                let mut buf_manag = buffer_manager.lock().unwrap();
+                for (i, buf_handle) in info.buffers.iter().enumerate() {
+                    let buf = buf_manag.get_buffer(*buf_handle).expect("Invalid handle");
+                    let buf_info = [vk::DescriptorBufferInfo::builder()
+                        .buffer(buf.buffer)
+                        .offset(0)
+                        .range(buf.size)
+                        .build()];
+                    buffer_infos.push(buf_info);
+                    db.bind_buffer(
+                        (image_infos.len() + i) as u32,
+                        buffer_infos.last().unwrap(),
+                        vk::DescriptorType::UNIFORM_BUFFER,
                         vk::ShaderStageFlags::FRAGMENT,
                     );
                 }

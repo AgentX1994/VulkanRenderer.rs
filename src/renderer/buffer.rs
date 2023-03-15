@@ -9,7 +9,7 @@ use super::error::InvalidHandle;
 use super::utils::{Handle, HandleArray};
 use super::RendererResult;
 
-struct InternalBuffer {
+pub struct InternalBuffer {
     device: ash::Device,
     allocation: Option<Allocation>,
     buffer: vk::Buffer,
@@ -198,7 +198,7 @@ impl BufferManager {
         Ok(buffer)
     }
 
-    fn get_buffer(&self, handle: Handle<InternalBuffer>) -> Option<BufferDetails> {
+    pub fn get_buffer(&self, handle: Handle<InternalBuffer>) -> Option<BufferDetails> {
         self.handle_array.get(handle).map(|int_buf| int_buf.into())
     }
 
@@ -275,6 +275,10 @@ pub struct Buffer {
 }
 
 impl Buffer {
+    pub fn get_handle(&self) -> Handle<InternalBuffer> {
+        self.handle
+    }
+
     pub fn fill<T>(&mut self, allocator: &mut Allocator, data: &[T]) -> RendererResult<()> {
         if !self.active {
             panic!("Tried to fill inactive buffer!");
