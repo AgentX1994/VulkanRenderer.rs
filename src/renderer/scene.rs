@@ -2,7 +2,13 @@ use std::{cell::RefCell, rc::Rc};
 
 use nalgebra_glm as glm;
 
-use super::{model::Model, utils::Handle, vertex::Vertex, InstanceData, RendererResult};
+use super::{
+    error::{InvalidHandle, RendererError},
+    model::Model,
+    utils::{Handle, HandleArray},
+    vertex::Vertex,
+    InstanceData, RendererResult,
+};
 
 #[derive(Debug)]
 pub struct SceneObject {
@@ -16,30 +22,12 @@ pub struct SceneObject {
     transform: glm::Mat4,
     global_transform: glm::Mat4,
 
-    parent: Option<Rc<RefCell<SceneObject>>>,
-    pub children: Vec<Rc<RefCell<SceneObject>>>,
+    pub parent: Option<Handle<SceneObject>>,
+    pub children: Vec<Handle<SceneObject>>,
 }
 
 impl SceneObject {
-    pub fn new_empty() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self {
-            model: None,
-            instance_id: None,
-            position: glm::Vec3::default(),
-            rotation: glm::Quat::identity(),
-            scaling: glm::Vec3::new(1.0, 1.0, 1.0),
-            transform_dirty: Default::default(),
-            transform: glm::Mat4::identity(),
-            global_transform: glm::Mat4::identity(),
-            parent: None,
-            children: Vec::new(),
-        }))
-    }
-
     fn update_instance(&mut self) -> RendererResult<()> {
-        if self.transform_dirty {
-            self.update_transform(false)?;
-        }
         if let Some(model) = &self.model {
             let instance_data = InstanceData::new(self.global_transform);
             if let Some(id) = &self.instance_id {
@@ -61,58 +49,99 @@ impl SceneObject {
             }
         }
         self.model = Some(model.clone());
-        self.update_instance()
-    }
-
-    pub fn add_child(parent: &Rc<RefCell<SceneObject>>, child: &Rc<RefCell<SceneObject>>) {
-        parent.borrow_mut().children.push(child.clone());
-        child.borrow_mut().parent = Some(parent.clone());
-    }
-
-    pub fn update_transform(&mut self, force: bool) -> RendererResult<()> {
-        if !self.transform_dirty && !force {
-            return Ok(());
-        }
-
-        self.transform = glm::Mat4::new_translation(&self.position)
-            * glm::quat_to_mat4(&self.rotation)
-            * glm::scaling(&self.scaling);
-        if let Some(parent) = &self.parent {
-            self.global_transform = self.transform * parent.borrow().global_transform;
-        } else {
-            self.global_transform = self.transform;
-        }
-        self.transform_dirty = false;
-        self.update_instance()?;
-
-        for child in &mut self.children {
-            child.borrow_mut().update_transform(true)?;
-        }
-
+        self.transform_dirty = true;
         Ok(())
     }
 
-    // pub fn set_position(&mut self, position: glm::Vec3) -> RendererResult<()> {
-    //     self.position = position;
-    //     self.update_transform(true)
-    // }
-}
-
-#[derive(Debug)]
-pub struct SceneTree {
-    root: Rc<RefCell<SceneObject>>,
-}
-
-impl Default for SceneTree {
-    fn default() -> Self {
-        Self {
-            root: SceneObject::new_empty(),
-        }
+    pub fn add_child(&mut self, child: Handle<SceneObject>) {
+        self.children.push(child);
     }
 }
 
+pub struct SceneObjectMutGuard<'a> {
+    // there has to be a better way to do this than storing a raw pointer?
+    scene_tree: *mut SceneTree,
+    object_handle: Handle<SceneObject>,
+    pub object: &'a mut SceneObject,
+}
+
+impl<'a> Drop for SceneObjectMutGuard<'a> {
+    fn drop(&mut self) {
+        let scene_tree = unsafe { self.scene_tree.as_mut().expect("Null scene tree pointer? ") };
+        scene_tree
+            .update_transform(self.object_handle)
+            .expect("Could not update transform");
+    }
+}
+
+impl<'a> SceneObjectMutGuard<'a> {}
+
+#[derive(Debug, Default)]
+pub struct SceneTree {
+    objects: HandleArray<SceneObject>,
+}
+
 impl SceneTree {
-    pub fn get_root(&self) -> Rc<RefCell<SceneObject>> {
-        self.root.clone()
+    pub fn new_object(&mut self) -> Handle<SceneObject> {
+        let scene_object = SceneObject {
+            model: None,
+            instance_id: None,
+            position: glm::Vec3::default(),
+            rotation: glm::Quat::identity(),
+            scaling: glm::Vec3::new(1.0, 1.0, 1.0),
+            transform_dirty: Default::default(),
+            transform: glm::Mat4::identity(),
+            global_transform: glm::Mat4::identity(),
+            parent: None,
+            children: Vec::new(),
+        };
+        self.objects.insert(scene_object)
+    }
+
+    pub fn get_object(&self, handle: Handle<SceneObject>) -> Option<&SceneObject> {
+        self.objects.get(handle)
+    }
+
+    pub fn get_object_mut(
+        &mut self,
+        handle: Handle<SceneObject>,
+    ) -> Option<SceneObjectMutGuard<'_>> {
+        let self_ptr = self as *mut SceneTree;
+        self.objects.get_mut(handle).map(|obj| SceneObjectMutGuard {
+            scene_tree: self_ptr,
+            object_handle: handle,
+            object: obj,
+        })
+    }
+
+    fn update_transform(&mut self, handle: Handle<SceneObject>) -> RendererResult<()> {
+        let parent_handle = self.objects.get(handle).expect("Invalid handle?").parent;
+        let parent_transform = parent_handle.map(|p_h| {
+            self.objects
+                .get(p_h)
+                .expect("Invalid parent handle?")
+                .global_transform
+        });
+        let children_handles = if let Some(obj) = self.objects.get_mut(handle) {
+            obj.transform = glm::Mat4::new_translation(&obj.position)
+                * glm::quat_to_mat4(&obj.rotation)
+                * glm::scaling(&obj.scaling);
+            if let Some(parent_transf) = &parent_transform {
+                obj.global_transform = obj.transform * *parent_transf;
+            } else {
+                obj.global_transform = obj.transform;
+            }
+            obj.transform_dirty = false;
+            obj.update_instance()?;
+            obj.children.clone()
+        } else {
+            return Err(RendererError::InvalidHandle(InvalidHandle));
+        };
+
+        for handle in children_handles {
+            self.update_transform(handle)?;
+        }
+
+        Ok(())
     }
 }

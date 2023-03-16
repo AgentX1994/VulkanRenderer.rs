@@ -11,7 +11,7 @@ use vulkan_rust::renderer::camera::Camera;
 use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
 use vulkan_rust::renderer::model::loaders::obj;
 use vulkan_rust::renderer::model::Model;
-use vulkan_rust::renderer::scene::{SceneObject, SceneTree};
+use vulkan_rust::renderer::scene::SceneTree;
 use vulkan_rust::renderer::vertex::Vertex;
 use vulkan_rust::renderer::InstanceData;
 use vulkan_rust::renderer::{error::RendererError, Renderer};
@@ -29,8 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sphere = Rc::new(RefCell::new(Model::<Vertex, InstanceData>::sphere(3)));
 
-    let scene_tree = SceneTree::default();
-    let root = scene_tree.get_root();
+    let mut scene_tree = SceneTree::default();
     for i in 0..10 {
         for j in 0..10 {
             let translation = glm::Vec3::new(i as f32 - 5., j as f32 + 5., 10.0);
@@ -39,14 +38,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let roughness = j as f32 * 0.1;
             let texture_id = ((i + j) % 3) as u32;
 
-            let new_object = SceneObject::new_empty();
-            SceneObject::add_child(&root, &new_object);
+            let new_object = scene_tree.new_object();
             {
-                let mut obj_ref = new_object.borrow_mut();
-                obj_ref.position = translation;
-                obj_ref.scaling = glm::Vec3::new(scale, scale, scale);
-                obj_ref.set_model(&sphere)?;
-                obj_ref.update_transform(true)?;
+                let mut obj_ref = scene_tree
+                    .get_object_mut(new_object)
+                    .expect("We were given an invalid handle");
+                obj_ref.object.position = translation;
+                obj_ref.object.scaling = glm::Vec3::new(scale, scale, scale);
+                obj_ref.object.set_model(&sphere)?;
             }
         }
     }
@@ -72,19 +71,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Try loading an obj model
     let car_model = Rc::new(RefCell::new(obj::load_obj("models/alfa147.obj")?));
     {
-        let car_object = SceneObject::new_empty();
-        SceneObject::add_child(&root, &car_object);
+        let new_object = scene_tree.new_object();
         {
-            let mut obj_ref = car_object.borrow_mut();
-            obj_ref.position = glm::Vec3::new(0f32, 15f32, 20f32);
-            obj_ref.scaling = glm::Vec3::new(0.1f32, 0.1f32, 0.1f32);
-            obj_ref.rotation = glm::Quat::from_polar_decomposition(
+            let mut obj_ref = scene_tree
+                .get_object_mut(new_object)
+                .expect("We were given an invalid handle");
+            obj_ref.object.position = glm::Vec3::new(0f32, 15f32, 20f32);
+            obj_ref.object.scaling = glm::Vec3::new(0.1f32, 0.1f32, 0.1f32);
+            obj_ref.object.rotation = glm::Quat::from_polar_decomposition(
                 1.0f32,
                 std::f32::consts::FRAC_2_PI,
                 na::Unit::<glm::Vec3>::new_normalize(glm::Vec3::new(1.0f32, 0.0f32, 0.0f32)),
             );
-            obj_ref.set_model(&car_model)?;
-            obj_ref.update_transform(true)?;
+            obj_ref.object.set_model(&car_model)?;
         }
     }
     if let Some(allo) = &mut renderer.allocator {
