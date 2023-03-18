@@ -1,6 +1,4 @@
-use std::cell::RefCell;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
@@ -17,7 +15,7 @@ mod descriptor;
 pub mod error;
 pub mod light;
 mod material;
-pub mod model;
+pub mod mesh;
 mod queue;
 mod render_target;
 pub mod scene;
@@ -30,15 +28,16 @@ pub mod vertex;
 
 use buffer::Buffer;
 use camera::Camera;
-use model::Model;
 use swapchain::Swapchain;
-use vertex::Vertex;
 
 use self::buffer::BufferManager;
 use self::context::VulkanContext;
 use self::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
+use self::error::{InvalidHandle, RendererError};
 use self::light::LightManager;
 use self::material::{MaterialData, MaterialSystem, MeshPassType, ShaderParameters};
+use self::mesh::MeshManager;
+use self::scene::SceneTree;
 use self::shaders::ShaderCache;
 use self::text::TextHandler;
 use self::texture::{Texture, TextureStorage};
@@ -67,22 +66,6 @@ impl Drop for FrameData {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct InstanceData {
-    pub model_matrix: [[f32; 4]; 4],
-    pub inverse_model_matrix: [[f32; 4]; 4],
-}
-
-impl InstanceData {
-    pub fn new(model: glm::Mat4) -> Self {
-        InstanceData {
-            model_matrix: model.into(),
-            inverse_model_matrix: model.try_inverse().expect("Could not get inverse!").into(),
-        }
-    }
-}
-
 pub struct Renderer {
     dropped: bool,
     pub context: VulkanContext,
@@ -91,6 +74,7 @@ pub struct Renderer {
     swapchain: Swapchain,
     render_pass: vk::RenderPass,
     shader_cache: ShaderCache,
+    pub scene_tree: SceneTree,
     descriptor_layout_cache: DescriptorLayoutCache,
     descriptor_allocator: DescriptorAllocator,
     material_system: MaterialSystem,
@@ -106,7 +90,7 @@ pub struct Renderer {
     texture_storage: TextureStorage,
     uniform_buffer_2: Buffer,
     pub text: TextHandler,
-    pub models: Vec<Rc<RefCell<Model<Vertex, InstanceData>>>>,
+    pub meshs: MeshManager,
 }
 
 impl Renderer {
@@ -321,7 +305,7 @@ impl Renderer {
             parameters: ShaderParameters::default(),
             base_template: "default".to_string(),
         };
-        let material_handle = material_system.build_material(
+        let _material_handle = material_system.build_material(
             &context.device,
             &texture_storage,
             buffer_manager.clone(),
@@ -368,6 +352,7 @@ impl Renderer {
             command_buffers,
             render_pass,
             shader_cache,
+            scene_tree: Default::default(),
             descriptor_layout_cache,
             descriptor_allocator,
             material_system,
@@ -381,7 +366,7 @@ impl Renderer {
             texture_storage,
             uniform_buffer_2: buffer,
             text,
-            models: vec![],
+            meshs: Default::default(),
         })
     }
 
@@ -519,8 +504,17 @@ impl Renderer {
                 // Only the camera offset changes
                 &[camera_buffer_offset as u32],
             );
-            for m in &self.models {
-                m.borrow().draw(&self.context.device, *cmd_buf);
+            for m in self.scene_tree.iter() {
+                let buf = m.get_buffer();
+                let inner_buf = buf.get_buffer();
+                self.context
+                    .device
+                    .cmd_bind_vertex_buffers(*cmd_buf, 1, &[inner_buf.buffer], &[0]);
+                let mesh = self
+                    .meshs
+                    .get_mesh(m.mesh)
+                    .ok_or(RendererError::InvalidHandle(InvalidHandle))?;
+                mesh.draw(&self.context.device, *cmd_buf);
             }
             self.text.draw(
                 &self.context.device,
@@ -553,17 +547,6 @@ impl Renderer {
             self.context
                 .device
                 .reset_fences(&[this_frame_data.in_flight_fence])?;
-            if let Some(alloc) = &mut self.allocator {
-                for m in &mut self.models {
-                    m.borrow_mut().update_instance_buffer(
-                        &self.context.device,
-                        alloc,
-                        self.buffer_manager.clone(),
-                    )?;
-                }
-            } else {
-                panic!("No allocator!");
-            }
             self.context.device.queue_submit(
                 self.context.graphics_queue.queue,
                 &submit_info,
@@ -994,18 +977,7 @@ impl Drop for Renderer {
                 .expect("Something wrong while waiting for idle");
 
             let mut allocator = self.allocator.take().expect("We had no allocator?!");
-            for m in &mut self.models {
-                let mut m = m.borrow_mut();
-                if let Some(vb) = &mut m.vertex_buffer {
-                    vb.queue_free(None).expect("Invalid Handle?!");
-                }
-                if let Some(ib) = &mut m.index_buffer {
-                    ib.queue_free(None).expect("Invalid Handle?!");
-                }
-                if let Some(ib) = &mut m.instance_buffer {
-                    ib.queue_free(None).expect("Invalid Handle?!");
-                }
-            }
+            self.meshs.destroy();
             self.uniform_buffer
                 .queue_free(None)
                 .expect("Invalid Handle?!");
@@ -1031,6 +1003,8 @@ impl Drop for Renderer {
             self.material_system.destroy(&self.context.device);
             self.shader_cache.destroy(&self.context.device);
             self.swapchain.destroy(&self.context, &mut allocator);
+
+            self.scene_tree.destroy();
 
             self.descriptor_layout_cache.destroy(&self.context.device);
             self.descriptor_allocator.destroy(&self.context.device);

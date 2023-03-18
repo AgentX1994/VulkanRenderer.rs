@@ -5,7 +5,7 @@ use memoffset::offset_of;
 use nalgebra_glm::{Vec2, Vec3};
 
 use super::material::VertexInputDescription;
-use super::InstanceData;
+use crate::renderer::scene::InstanceData;
 
 #[repr(C, packed)]
 #[derive(Debug, Default, Copy, Clone)]

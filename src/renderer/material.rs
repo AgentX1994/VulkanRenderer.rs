@@ -475,7 +475,7 @@ impl MaterialSystem {
                 }
                 let mut buffer_infos = vec![];
                 buffer_infos.reserve(info.buffers.len());
-                let mut buf_manag = buffer_manager.lock().unwrap();
+                let buf_manag = buffer_manager.lock().unwrap();
                 for (i, buf_handle) in info.buffers.iter().enumerate() {
                     let buf = buf_manag.get_buffer(*buf_handle).expect("Invalid handle");
                     let buf_info = [vk::DescriptorBufferInfo::builder()

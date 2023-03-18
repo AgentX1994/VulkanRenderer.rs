@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
@@ -11,55 +12,79 @@ use gpu_allocator::MemoryLocation;
 use crate::renderer::Buffer;
 
 use super::buffer::BufferManager;
-use super::error::InvalidHandle;
 use super::utils::{Handle, HandleArray};
 use super::vertex::Vertex;
-use super::{InstanceData, RendererResult};
+use super::RendererResult;
 
 pub mod loaders;
 
-pub struct Model<V, I> {
-    vertex_data: Vec<V>,
+#[derive(Debug)]
+pub struct Mesh {
+    vertex_data: Vec<Vertex>,
     index_data: Vec<u32>,
-    handle_array: HandleArray<I>,
-    first_invisible: usize,
     pub vertex_buffer: Option<Buffer>,
     pub index_buffer: Option<Buffer>,
-    pub instance_buffer: Option<Buffer>,
 }
 
-impl<V, I> Debug for Model<V, I>
-where
-    V: Debug,
-    I: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Model")
-            .field("vertex_data", &self.vertex_data)
-            .field("index_data", &self.index_data)
-            .field("handle_array", &self.handle_array)
-            .field("first_invisible", &self.first_invisible)
-            .field("vertex_buffer", &self.vertex_buffer)
-            .field("index_buffer", &self.index_buffer)
-            .field("instance_buffer", &self.instance_buffer)
-            .finish()
-    }
-}
-
-impl<V, I> Model<V, I> {
-    pub fn new(vertices: Vec<V>, indices: Vec<u32>) -> Model<V, I> {
-        Model {
+impl Mesh {
+    fn new(vertices: Vec<Vertex>, indices: Vec<u32>) -> Mesh {
+        Mesh {
             vertex_data: vertices,
             index_data: indices,
-            handle_array: Default::default(),
-            first_invisible: 0,
             vertex_buffer: None,
             index_buffer: None,
-            instance_buffer: None,
         }
     }
 
-    pub fn cube() -> Model<Vertex, InstanceData> {
+    pub fn subdivide(&mut self) {
+        let mut new_indices = vec![];
+        let mut midpoints = HashMap::<(u32, u32), u32>::new();
+        for triangle in self.index_data.chunks(3) {
+            let a = triangle[0];
+            let b = triangle[1];
+            let c = triangle[2];
+            let vert_a = self.vertex_data[a as usize];
+            let vert_b = self.vertex_data[b as usize];
+            let vert_c = self.vertex_data[c as usize];
+
+            let mab = if let Some(ab) = midpoints.get(&(a, b)) {
+                *ab
+            } else {
+                let vert_ab = Vertex::midpoint(&vert_a, &vert_b);
+                let mab = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_ab);
+                midpoints.insert((a, b), mab);
+                midpoints.insert((b, a), mab);
+                mab
+            };
+
+            let mbc = if let Some(bc) = midpoints.get(&(b, c)) {
+                *bc
+            } else {
+                let vert_bc = Vertex::midpoint(&vert_b, &vert_c);
+                let mbc = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_bc);
+                midpoints.insert((b, c), mbc);
+                midpoints.insert((c, b), mbc);
+                mbc
+            };
+
+            let mca = if let Some(ca) = midpoints.get(&(c, a)) {
+                *ca
+            } else {
+                let vert_ca = Vertex::midpoint(&vert_c, &vert_a);
+                let mca = self.vertex_data.len() as u32;
+                self.vertex_data.push(vert_ca);
+                midpoints.insert((c, a), mca);
+                midpoints.insert((a, c), mca);
+                mca
+            };
+            new_indices.extend_from_slice(&[mca, a, mab, mab, b, mbc, mbc, c, mca, mab, mbc, mca]);
+        }
+        self.index_data = new_indices;
+    }
+
+    fn cube() -> Mesh {
         // TODO Fix normals?
         let lbf = Vertex::new(
             Vec3::new(-1.0, 1.0, -1.0),
@@ -101,7 +126,7 @@ impl<V, I> Model<V, I> {
             Vec3::new(1.0, -1.0, 1.0),
             Vec2::new(0.5, 0.5),
         );
-        Model::new(
+        Mesh::new(
             vec![lbf, lbb, ltf, ltb, rbf, rbb, rtf, rtb],
             vec![
                 0, 1, 5, 0, 5, 4, // bottom
@@ -114,7 +139,7 @@ impl<V, I> Model<V, I> {
         )
     }
 
-    pub fn icosahedron() -> Model<Vertex, InstanceData> {
+    fn icosahedron() -> Mesh {
         let phi = (1.0 + 5.0_f32.sqrt()) / 2.0;
         let darkgreen_front_top = Vertex::new(
             Vec3::new(phi, -1.0, 0.0),
@@ -198,7 +223,7 @@ impl<V, I> Model<V, I> {
             let phi = (norm.y.asin() / std::f32::consts::PI) + 0.5;
             v.uv = Vec2::new(theta, phi);
         }
-        Model::new(
+        Mesh::new(
             vertex_data,
             vec![
                 0, 9, 8, //
@@ -225,8 +250,8 @@ impl<V, I> Model<V, I> {
         )
     }
 
-    pub fn sphere(refinements: u32) -> Model<Vertex, InstanceData> {
-        let mut model = Model::<Vertex, InstanceData>::icosahedron();
+    fn sphere(refinements: u32) -> Mesh {
+        let mut model = Mesh::icosahedron();
         for _ in 0..refinements {
             model.subdivide();
         }
@@ -247,70 +272,6 @@ impl<V, I> Model<V, I> {
         model
     }
 
-    pub fn get(&self, handle: Handle<I>) -> Option<&I> {
-        self.handle_array.get(handle)
-    }
-
-    pub fn get_mut(&mut self, handle: Handle<I>) -> Option<&mut I> {
-        self.handle_array.get_mut(handle)
-    }
-
-    fn is_visible(&self, handle: Handle<I>) -> Result<bool, InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle) {
-            Ok(index < self.first_invisible)
-        } else {
-            Err(InvalidHandle)
-        }
-    }
-
-    fn make_visible(&mut self, handle: Handle<I>) -> Result<(), InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle) {
-            if index < self.first_invisible {
-                return Ok(());
-            }
-            self.handle_array.swap_by_index(index, self.first_invisible);
-            self.first_invisible += 1;
-            Ok(())
-        } else {
-            Err(InvalidHandle)
-        }
-    }
-
-    fn make_invisible(&mut self, handle: Handle<I>) -> Result<(), InvalidHandle> {
-        if let Some(index) = self.handle_array.get_index(handle) {
-            if index >= self.first_invisible {
-                return Ok(());
-            }
-            self.handle_array
-                .swap_by_index(index, self.first_invisible - 1);
-            self.first_invisible -= 1;
-            Ok(())
-        } else {
-            Err(InvalidHandle)
-        }
-    }
-
-    pub fn insert(&mut self, element: I) -> Handle<I> {
-        self.handle_array.insert(element)
-    }
-
-    pub fn insert_visibly(&mut self, element: I) -> Handle<I> {
-        let new_handle = self.insert(element);
-        // We just inserted this element, we know it exists
-        self.make_visible(new_handle).unwrap();
-        new_handle
-    }
-
-    pub fn update(&mut self, handle: Handle<I>, element: I) -> RendererResult<()> {
-        let elem = self.handle_array.get_mut(handle).ok_or(InvalidHandle)?;
-        *elem = element;
-        Ok(())
-    }
-
-    pub fn remove(&mut self, handle: Handle<I>) -> RendererResult<I> {
-        self.handle_array.remove(handle)
-    }
-
     pub fn update_vertex_buffer(
         &mut self,
         device: &ash::Device,
@@ -321,7 +282,7 @@ impl<V, I> Model<V, I> {
             buffer.fill(allocator, &self.vertex_data)?;
             Ok(())
         } else {
-            let bytes = self.vertex_data.len() * std::mem::size_of::<V>();
+            let bytes = self.vertex_data.len() * std::mem::size_of::<Vertex>();
             let mut buffer = BufferManager::new_buffer(
                 buffer_manager,
                 device,
@@ -361,123 +322,133 @@ impl<V, I> Model<V, I> {
         }
     }
 
-    pub fn update_instance_buffer(
-        &mut self,
-        device: &ash::Device,
-        allocator: &mut Allocator,
-        buffer_manager: Arc<Mutex<BufferManager>>,
-    ) -> RendererResult<()> {
-        if self.first_invisible == 0 {
-            return Ok(());
-        }
-        if let Some(buffer) = &mut self.instance_buffer {
-            buffer.fill(allocator, self.handle_array.get_data())?;
-            Ok(())
-        } else {
-            let bytes = self.first_invisible * std::mem::size_of::<I>();
-            let mut buffer = BufferManager::new_buffer(
-                buffer_manager,
-                device,
-                allocator,
-                bytes as u64,
-                vk::BufferUsageFlags::VERTEX_BUFFER,
-                MemoryLocation::CpuToGpu,
-            )?;
-            buffer.fill(allocator, self.handle_array.get_data())?;
-            self.instance_buffer = Some(buffer);
-            Ok(())
-        }
-    }
-
     pub fn draw(&self, device: &ash::Device, command_buffer: vk::CommandBuffer) {
         if let Some(vert_buf) = &self.vertex_buffer {
             if let Some(ind_buf) = &self.index_buffer {
-                if let Some(inst_buf) = &self.instance_buffer {
-                    if self.first_invisible > 0 {
-                        unsafe {
-                            let vert_buf_int = vert_buf.get_buffer();
-                            let ind_buf_int = ind_buf.get_buffer();
-                            let inst_buf_int = inst_buf.get_buffer();
-                            device.cmd_bind_vertex_buffers(
-                                command_buffer,
-                                0,
-                                &[vert_buf_int.buffer],
-                                &[0],
-                            );
-                            device.cmd_bind_index_buffer(
-                                command_buffer,
-                                ind_buf_int.buffer,
-                                0,
-                                vk::IndexType::UINT32,
-                            );
-                            device.cmd_bind_vertex_buffers(
-                                command_buffer,
-                                1,
-                                &[inst_buf_int.buffer],
-                                &[0],
-                            );
-                            device.cmd_draw_indexed(
-                                command_buffer,
-                                self.index_data.len() as u32,
-                                self.first_invisible as u32,
-                                0,
-                                0,
-                                0,
-                            );
-                        }
-                    }
+                unsafe {
+                    let vert_buf_int = vert_buf.get_buffer();
+                    let ind_buf_int = ind_buf.get_buffer();
+                    device.cmd_bind_vertex_buffers(command_buffer, 0, &[vert_buf_int.buffer], &[0]);
+                    device.cmd_bind_index_buffer(
+                        command_buffer,
+                        ind_buf_int.buffer,
+                        0,
+                        vk::IndexType::UINT32,
+                    );
+                    device.cmd_draw_indexed(
+                        command_buffer,
+                        self.index_data.len() as u32,
+                        1,
+                        0,
+                        0,
+                        0,
+                    );
                 }
             }
         }
     }
 }
 
-impl Model<Vertex, InstanceData> {
-    pub fn subdivide(&mut self) {
-        let mut new_indices = vec![];
-        let mut midpoints = HashMap::<(u32, u32), u32>::new();
-        for triangle in self.index_data.chunks(3) {
-            let a = triangle[0];
-            let b = triangle[1];
-            let c = triangle[2];
-            let vert_a = self.vertex_data[a as usize];
-            let vert_b = self.vertex_data[b as usize];
-            let vert_c = self.vertex_data[c as usize];
-
-            let mab = if let Some(ab) = midpoints.get(&(a, b)) {
-                *ab
-            } else {
-                let vert_ab = Vertex::midpoint(&vert_a, &vert_b);
-                let mab = self.vertex_data.len() as u32;
-                self.vertex_data.push(vert_ab);
-                midpoints.insert((a, b), mab);
-                midpoints.insert((b, a), mab);
-                mab
-            };
-
-            let mbc = if let Some(bc) = midpoints.get(&(b, c)) {
-                *bc
-            } else {
-                let vert_bc = Vertex::midpoint(&vert_b, &vert_c);
-                let mbc = self.vertex_data.len() as u32;
-                self.vertex_data.push(vert_bc);
-                midpoints.insert((b, c), mbc);
-                midpoints.insert((c, b), mbc);
-                mbc
-            };
-
-            let mca = if let Some(ca) = midpoints.get(&(c, a)) {
-                *ca
-            } else {
-                let vert_ca = Vertex::midpoint(&vert_c, &vert_a);
-                let mca = self.vertex_data.len() as u32;
-                self.vertex_data.push(vert_ca);
-                midpoints.insert((c, a), mca);
-                midpoints.insert((a, c), mca);
-                mca
-            };
-            new_indices.extend_from_slice(&[mca, a, mab, mab, b, mbc, mbc, c, mca, mab, mbc, mca]);
+impl Drop for Mesh {
+    fn drop(&mut self) {
+        if let Some(buf) = &mut self.vertex_buffer {
+            buf.queue_free(None).expect("Could not free buffer");
         }
-        self.index_data = new_indices;
+        if let Some(buf) = &mut self.index_buffer {
+            buf.queue_free(None).expect("Could not free buffer");
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MeshManager {
+    meshs: HandleArray<Mesh>,
+}
+
+impl MeshManager {
+    fn add_mesh(
+        &mut self,
+        mut mesh: Mesh,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        mesh.update_vertex_buffer(device, allocator, buffer_manager.clone())?;
+        mesh.update_index_buffer(device, allocator, buffer_manager)?;
+        Ok(self.meshs.insert(mesh))
+    }
+
+    pub fn new_mesh(
+        &mut self,
+        vertices: Vec<Vertex>,
+        indices: Vec<u32>,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        let mesh = Mesh::new(vertices, indices);
+        self.add_mesh(mesh, device, allocator, buffer_manager)
+    }
+
+    pub fn new_cube_mesh(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        let mesh = Mesh::cube();
+        self.add_mesh(mesh, device, allocator, buffer_manager)
+    }
+
+    pub fn new_icosahedron_mesh(
+        &mut self,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        let mesh = Mesh::icosahedron();
+        self.add_mesh(mesh, device, allocator, buffer_manager)
+    }
+
+    pub fn new_sphere_mesh(
+        &mut self,
+        refinements: u32,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        let mesh = Mesh::sphere(refinements);
+        self.add_mesh(mesh, device, allocator, buffer_manager)
+    }
+
+    pub fn new_mesh_from_obj<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        device: &ash::Device,
+        allocator: &mut Allocator,
+        buffer_manager: Arc<Mutex<BufferManager>>,
+    ) -> RendererResult<Handle<Mesh>> {
+        let mesh = loaders::obj::load_obj(path)?;
+        self.add_mesh(mesh, device, allocator, buffer_manager)
+    }
+
+    pub fn get_mesh(&self, handle: Handle<Mesh>) -> Option<&Mesh> {
+        self.meshs.get(handle)
+    }
+
+    pub fn get_mesh_mut(&mut self, handle: Handle<Mesh>) -> Option<&mut Mesh> {
+        self.meshs.get_mut(handle)
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, Mesh> {
+        self.meshs.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, Mesh> {
+        self.meshs.iter_mut()
+    }
+
+    pub fn destroy(&mut self) {
+        self.meshs.clear();
     }
 }

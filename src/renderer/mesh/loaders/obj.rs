@@ -4,9 +4,8 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use crate::renderer::error::RendererResult;
-use crate::renderer::model::Model;
+use crate::renderer::mesh::Mesh;
 use crate::renderer::vertex::Vertex;
-use crate::renderer::InstanceData;
 
 // Helper function to get an index from a vector
 fn get_from_vector<R: Copy>(vector: &Vec<R>, index: i64) -> Option<R> {
@@ -37,7 +36,7 @@ fn insert_or_get_index_of_vertex(
     }
 }
 
-pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Model<Vertex, InstanceData>> {
+pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Mesh> {
     let obj_file = File::open(path)?;
     let reader = BufReader::new(obj_file);
 
@@ -240,5 +239,5 @@ pub fn load_obj<P: AsRef<Path>>(path: P) -> RendererResult<Model<Vertex, Instanc
         }
     }
 
-    Ok(Model::new(vertices_structs, indices))
+    Ok(Mesh::new(vertices_structs, indices))
 }
