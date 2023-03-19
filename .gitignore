@@ -1,4 +1,8 @@
 /target
+/models
+*.ttf
 .gdb_history
 screenshot.jpg
-texture.png
+*.png
+*.jpg
+output.log

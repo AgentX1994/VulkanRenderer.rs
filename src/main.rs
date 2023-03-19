@@ -1,3 +1,4 @@
+use log::info;
 use vulkan_rust::renderer::utils::create_render_window;
 use winit::event::{Event, WindowEvent};
 
@@ -9,7 +10,7 @@ use vulkan_rust::renderer::light::{DirectionalLight, LightManager, PointLight};
 use vulkan_rust::renderer::{error::RendererError, Renderer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    log4rs::init_file("log4rs.yml", Default::default()).unwrap();
     let (event_loop, window, internal_window) = create_render_window()?;
     let window_size = window.inner_size();
     let mut renderer = Renderer::new(
@@ -267,7 +268,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             winit::event::VirtualKeyCode::F12 => {
                 if matches!(pressed, winit::event::ElementState::Pressed) {
                     renderer.screenshot().expect("Could not take screenshot");
-                    println!("Screenshotted!");
+                    info!("Screenshotted!");
                 }
             }
             winit::event::VirtualKeyCode::Escape => {

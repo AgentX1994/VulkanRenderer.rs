@@ -4,6 +4,7 @@ use ash::{
     extensions::{ext, khr},
     vk, Instance,
 };
+use log::{debug, error, info, warn};
 
 use super::{queue::Queue, utils::InternalWindow, RendererResult};
 
@@ -100,7 +101,7 @@ impl VulkanContext {
         let mut chosen = None;
         for p in phys_devs {
             let props = unsafe { instance.get_physical_device_properties(p) };
-            dbg!(props);
+            info!("{:?}", props);
             if chosen.is_none() {
                 chosen = Some((p, props));
             }
@@ -369,10 +370,26 @@ impl VulkanContext {
         let message_str = unsafe { CStr::from_ptr((*callback_data).p_message) };
         let severity_str = format!("{:?}", severity).to_lowercase();
         let ty = format!("{:?}", typ).to_lowercase();
-        println!("[Debug][{}][{}] {:?}", severity_str, ty, message_str);
-        if severity == vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
-            let bt = backtrace::Backtrace::new();
-            println!("{:?}", bt);
+        match severity {
+            vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => {
+                debug!("Vulkan: {}: {:?}", ty, message_str);
+            }
+            vk::DebugUtilsMessageSeverityFlagsEXT::INFO => {
+                info!("Vulkan: {}: {:?}", ty, message_str);
+            }
+            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => {
+                warn!("Vulkan: {}: {:?}", ty, message_str);
+            }
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
+                let bt = backtrace::Backtrace::new();
+                error!("{:?}", bt);
+            }
+            _ => {
+                error!(
+                    "Vulkan: error \"{}\" of unknown severity: {:?}",
+                    ty, message_str
+                );
+            }
         }
         vk::FALSE
     }

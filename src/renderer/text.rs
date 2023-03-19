@@ -7,6 +7,7 @@ use ash::Device;
 
 use gpu_allocator::vulkan::Allocator;
 use gpu_allocator::MemoryLocation;
+use log::error;
 use memoffset::offset_of;
 
 use super::{
@@ -417,7 +418,7 @@ impl TextHandler {
             {
                 char_data
             } else {
-                println!("Could not find char data for glyph?");
+                error!("Could not find char data for glyph?");
                 continue;
             };
             let left =
@@ -515,13 +516,13 @@ impl TextHandler {
             {
                 atlas
             } else {
-                println!("Could not find atlas for px {}", text_buffer.px);
+                error!("Could not find atlas for px {}", text_buffer.px);
                 continue;
             };
             let material_handle = if let Some(handle) = atlas.material_handle {
                 handle
             } else {
-                println!("Atlas {} px has no material handle!", text_buffer.px);
+                error!("Atlas {} px has no material handle!", text_buffer.px);
                 continue;
             };
             let material = material_system.get_material_by_handle(material_handle)?;

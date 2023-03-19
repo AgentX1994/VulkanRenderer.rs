@@ -5,6 +5,7 @@ use gpu_allocator::{
     vulkan::{Allocation, AllocationCreateDesc, Allocator},
     MemoryLocation,
 };
+use log::info;
 
 use super::{
     buffer::BufferManager,
@@ -243,7 +244,7 @@ impl Texture {
 
         //  allocate memory for image
         let reqs = unsafe { device.get_image_memory_requirements(image) };
-        println!(
+        info!(
             "Creating Texture atlas of size {}x{}, {} bytes",
             width, height, reqs.size
         );

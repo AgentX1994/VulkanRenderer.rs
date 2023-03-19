@@ -1,7 +1,7 @@
 use core::slice;
 use std::sync::{Arc, Mutex};
 
-use ash::{vk, Instance};
+use ash::vk;
 use gpu_allocator::{vulkan::Allocator, MemoryLocation};
 use nalgebra_glm as glm;
 
