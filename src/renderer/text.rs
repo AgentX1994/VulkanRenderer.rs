@@ -19,7 +19,6 @@ use super::{
         Material, MaterialData, MaterialSystem, MeshPassType, ShaderParameters,
         VertexInputDescription,
     },
-    swapchain::Swapchain,
     texture::{Texture, TextureStorage},
     utils::Handle,
     RendererResult,
@@ -191,7 +190,7 @@ impl TextHandler {
         let font_name = font_path.as_ref().to_string_lossy().into_owned();
         let font_data = std::fs::read(font_path)?;
         let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())
-            .map_err::<RendererError, _>(|s| FontError(s.into()).into())?;
+            .map_err::<RendererError, _>(|s| FontError(s).into())?;
 
         Ok(TextHandler {
             vertex_data: HashMap::new(),
@@ -373,7 +372,6 @@ impl TextHandler {
         buffer_manager: Arc<Mutex<BufferManager>>,
         command_pool: &vk::CommandPool,
         queue: &vk::Queue,
-        swapchain: &Swapchain,
         descriptor_layout_cache: &mut DescriptorLayoutCache,
         descriptor_allocator: &mut DescriptorAllocator,
         material_system: &mut MaterialSystem,

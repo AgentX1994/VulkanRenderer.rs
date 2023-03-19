@@ -1,4 +1,8 @@
+use ash::vk;
+use gpu_allocator::MemoryLocation;
 use log::info;
+use vulkan_rust::renderer::buffer::BufferManager;
+use vulkan_rust::renderer::material::{MaterialData, ShaderParameters};
 use vulkan_rust::renderer::utils::create_render_window;
 use winit::event::{Event, WindowEvent};
 
@@ -20,6 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         internal_window,
     )?;
 
+    let tex1_handle = renderer.new_texture_from_file("texture.png")?;
+    let tex2_handle = renderer.new_texture_from_file("texture2.jpg")?;
+    let tex3_handle = renderer.new_texture_from_file("texture3.jpg")?;
+    let tex4_handle = renderer.new_texture_from_file("plain_white.jpg")?;
+
     let sphere = if let Some(allo) = &mut renderer.allocator {
         renderer.meshs.new_sphere_mesh(
             3,
@@ -30,6 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         panic!("No allocator!");
     };
+    let mut bufs = vec![];
 
     for i in 0..10 {
         for j in 0..10 {
@@ -39,9 +49,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let roughness = j as f32 * 0.1;
             let texture_id = ((i + j) % 3) as u32;
 
+            let tex_handle = match texture_id {
+                0 => tex1_handle,
+                1 => tex2_handle,
+                2 => tex3_handle,
+                _ => unreachable!(),
+            };
+
             if let Some(allo) = &mut renderer.allocator {
+                // allocate uniform buffer
+                let mut buffer = BufferManager::new_buffer(
+                    renderer.buffer_manager.clone(),
+                    &renderer.context.device,
+                    allo,
+                    2 * 4,
+                    vk::BufferUsageFlags::UNIFORM_BUFFER,
+                    MemoryLocation::CpuToGpu,
+                )?;
+                let material_data = [metallic, roughness];
+                buffer.fill(allo, &material_data)?;
+                let mat_data = MaterialData {
+                    textures: vec![tex_handle],
+                    buffers: vec![buffer.get_handle()],
+                    parameters: ShaderParameters::default(),
+                    base_template: "default".to_string(),
+                };
+                let mat_name = format!("mat_{}_{}", metallic, roughness);
+                let material_handle = renderer.material_system.build_material(
+                    &renderer.context.device,
+                    &renderer.texture_storage,
+                    renderer.buffer_manager.clone(),
+                    &mut renderer.descriptor_layout_cache,
+                    &mut renderer.descriptor_allocator,
+                    mat_name.as_str(),
+                    mat_data,
+                )?;
+                bufs.push(buffer);
+
                 let new_object = renderer.scene_tree.new_object(
                     sphere,
+                    material_handle,
                     &renderer.context.device,
                     allo,
                     renderer.buffer_manager.clone(),
@@ -73,8 +120,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     {
         if let Some(allo) = &mut renderer.allocator {
+            // allocate uniform buffer
+            let mut buffer = BufferManager::new_buffer(
+                renderer.buffer_manager.clone(),
+                &renderer.context.device,
+                allo,
+                2 * 4,
+                vk::BufferUsageFlags::UNIFORM_BUFFER,
+                MemoryLocation::CpuToGpu,
+            )?;
+            let material_data = [0.8f32, 0.1f32];
+            buffer.fill(allo, &material_data)?;
+            let mat_data = MaterialData {
+                textures: vec![tex4_handle],
+                buffers: vec![buffer.get_handle()],
+                parameters: ShaderParameters::default(),
+                base_template: "default".to_string(),
+            };
+            let material_handle = renderer.material_system.build_material(
+                &renderer.context.device,
+                &renderer.texture_storage,
+                renderer.buffer_manager.clone(),
+                &mut renderer.descriptor_layout_cache,
+                &mut renderer.descriptor_allocator,
+                "car_material",
+                mat_data,
+            )?;
+            bufs.push(buffer);
             let new_object = renderer.scene_tree.new_object(
                 car_model,
+                material_handle,
                 &renderer.context.device,
                 allo,
                 renderer.buffer_manager.clone(),
@@ -130,11 +205,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut turn_right_pressed = false;
     let mut turn_left_pressed = false;
 
-    let _tex1_index = renderer.new_texture_from_file("texture.png")?;
-    let _tex2_index = renderer.new_texture_from_file("texture2.jpg")?;
-    let _tex3_index = renderer.new_texture_from_file("texture3.jpg")?;
-    let _tex3_index = renderer.new_texture_from_file("plain_white.jpg")?;
-
     // Create some text
     renderer.add_text(
         &window,
@@ -185,6 +255,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             running = false;
             *controlflow = winit::event_loop::ControlFlow::Exit;
+            for buf in bufs.iter_mut() {
+                buf.queue_free(None).expect("Could not queue buf for free")
+            }
         }
         Event::WindowEvent {
             event:
@@ -274,6 +347,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             winit::event::VirtualKeyCode::Escape => {
                 running = false;
                 *controlflow = winit::event_loop::ControlFlow::Exit;
+                for buf in bufs.iter_mut() {
+                    buf.queue_free(None).expect("Could not queue buf for free")
+                }
             }
             _ => {}
         },

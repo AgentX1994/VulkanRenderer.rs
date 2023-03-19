@@ -8,6 +8,7 @@ use nalgebra_glm as glm;
 use super::{
     buffer::{Buffer, BufferManager},
     error::InvalidHandle,
+    material::Material,
     mesh::Mesh,
     utils::{Handle, HandleArray},
     RendererResult,
@@ -41,6 +42,7 @@ impl InstanceData {
 #[derive(Debug)]
 pub struct SceneObject {
     pub mesh: Handle<Mesh>,
+    pub material: Handle<Material>,
     pub position: glm::Vec3,
     pub rotation: glm::Quat,
     pub scaling: glm::Vec3,
@@ -107,6 +109,7 @@ impl SceneTree {
     pub fn new_object(
         &mut self,
         mesh: Handle<Mesh>,
+        material: Handle<Material>,
         device: &ash::Device,
         allocator: &mut Allocator,
         buffer_manager: Arc<Mutex<BufferManager>>,
@@ -121,6 +124,7 @@ impl SceneTree {
         )?;
         let scene_object = SceneObject {
             mesh,
+            material,
             position: glm::Vec3::default(),
             rotation: glm::Quat::identity(),
             scaling: glm::Vec3::new(1.0, 1.0, 1.0),

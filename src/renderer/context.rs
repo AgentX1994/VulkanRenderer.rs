@@ -368,7 +368,6 @@ impl VulkanContext {
         }
 
         let message_str = unsafe { CStr::from_ptr((*callback_data).p_message) };
-        let severity_str = format!("{:?}", severity).to_lowercase();
         let ty = format!("{:?}", typ).to_lowercase();
         match severity {
             vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => {
@@ -382,7 +381,7 @@ impl VulkanContext {
             }
             vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
                 let bt = backtrace::Backtrace::new();
-                error!("{:?}", bt);
+                warn!("Vulkan: {}: {:?}\n {:?}", ty, message_str, bt);
             }
             _ => {
                 error!(

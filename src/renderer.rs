@@ -8,13 +8,13 @@ use nalgebra_glm as glm;
 
 use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc};
 
-mod buffer;
+pub mod buffer;
 pub mod camera;
 mod context;
 mod descriptor;
 pub mod error;
 pub mod light;
-mod material;
+pub mod material;
 pub mod mesh;
 mod queue;
 mod render_target;
@@ -35,7 +35,7 @@ use self::context::VulkanContext;
 use self::descriptor::{DescriptorAllocator, DescriptorLayoutCache};
 use self::error::{InvalidHandle, RendererError};
 use self::light::LightManager;
-use self::material::{MaterialData, MaterialSystem, MeshPassType, ShaderParameters};
+use self::material::{MaterialSystem, MeshPassType};
 use self::mesh::MeshManager;
 use self::scene::SceneTree;
 use self::shaders::ShaderCache;
@@ -75,9 +75,9 @@ pub struct Renderer {
     render_pass: vk::RenderPass,
     shader_cache: ShaderCache,
     pub scene_tree: SceneTree,
-    descriptor_layout_cache: DescriptorLayoutCache,
-    descriptor_allocator: DescriptorAllocator,
-    material_system: MaterialSystem,
+    pub descriptor_layout_cache: DescriptorLayoutCache,
+    pub descriptor_allocator: DescriptorAllocator,
+    pub material_system: MaterialSystem,
     graphics_command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
     frame_data: Vec<FrameData>,
@@ -87,8 +87,7 @@ pub struct Renderer {
     descriptor_set_camera: vk::DescriptorSet,
     descriptor_set_lights: vk::DescriptorSet,
     light_buffer: Buffer,
-    texture_storage: TextureStorage,
-    uniform_buffer_2: Buffer,
+    pub texture_storage: TextureStorage,
     pub text: TextHandler,
     pub meshs: MeshManager,
 }
@@ -270,50 +269,16 @@ impl Renderer {
         light_buffer.fill(&mut allocator, &[0.0f32; 2])?;
 
         let mut shader_cache = ShaderCache::new(&context.device)?;
-        let mut material_system =
-            MaterialSystem::new(&context.device, render_pass, &mut shader_cache)?;
+        let material_system = MaterialSystem::new(&context.device, render_pass, &mut shader_cache)?;
 
-        let mut descriptor_layout_cache = DescriptorLayoutCache::default();
+        let descriptor_layout_cache = DescriptorLayoutCache::default();
         let mut descriptor_allocator = DescriptorAllocator::default();
 
         let text = TextHandler::new("Roboto-Regular.ttf")?;
 
-        let mut texture_storage = TextureStorage::default();
+        let texture_storage = TextureStorage::default();
 
         let default_template_handle = material_system.get_effect_template_handle("default")?;
-        let texture_handle = texture_storage.new_texture_from_file(
-            "plain_white.jpg",
-            &context.device,
-            &mut allocator,
-            buffer_manager.clone(),
-            graphics_command_pool,
-            context.graphics_queue.queue,
-        )?;
-        let mut buffer = BufferManager::new_buffer(
-            buffer_manager.clone(),
-            &context.device,
-            &mut allocator,
-            2 * 4,
-            vk::BufferUsageFlags::UNIFORM_BUFFER,
-            MemoryLocation::CpuToGpu,
-        )?;
-        let material_data = [0.5f32, 0.5f32];
-        buffer.fill(&mut allocator, &material_data)?;
-        let default_material_data = MaterialData {
-            textures: vec![texture_handle],
-            buffers: vec![buffer.get_handle()],
-            parameters: ShaderParameters::default(),
-            base_template: "default".to_string(),
-        };
-        let _material_handle = material_system.build_material(
-            &context.device,
-            &texture_storage,
-            buffer_manager.clone(),
-            &mut descriptor_layout_cache,
-            &mut descriptor_allocator,
-            "default",
-            default_material_data,
-        )?;
         let default_template =
             material_system.get_effect_template_by_handle(default_template_handle)?;
 
@@ -364,7 +329,6 @@ impl Renderer {
             descriptor_set_lights,
             light_buffer,
             texture_storage,
-            uniform_buffer_2: buffer,
             text,
             meshs: Default::default(),
         })
@@ -453,23 +417,6 @@ impl Renderer {
                 &render_pass_begin_info,
                 vk::SubpassContents::INLINE,
             );
-            let material_handle = self
-                .material_system
-                .get_material_handle("default")
-                .expect("No \"default\" material");
-            let material = self
-                .material_system
-                .get_material_by_handle(material_handle)
-                .expect("Could not get default material");
-            let effect_template = self
-                .material_system
-                .get_effect_template_by_handle(material.original)
-                .expect("No default template");
-            self.context.device.cmd_bind_pipeline(
-                *cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                effect_template.pass_shaders[MeshPassType::Forward].pipeline,
-            );
 
             let viewports = [vk::Viewport {
                 x: 0.,
@@ -484,27 +431,50 @@ impl Renderer {
                 extent: self.swapchain.get_extent(),
             }];
 
-            self.context
-                .device
-                .cmd_set_viewport(*cmd_buf, 0, &viewports);
-            self.context.device.cmd_set_scissor(*cmd_buf, 0, &scissors);
-
             let camera_buffer_offset = image_index * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
-
-            self.context.device.cmd_bind_descriptor_sets(
-                *cmd_buf,
-                vk::PipelineBindPoint::GRAPHICS,
-                effect_template.pass_shaders[MeshPassType::Forward].layout,
-                0,
-                &[
-                    self.descriptor_set_camera,
-                    self.descriptor_set_lights,
-                    material.pass_sets[MeshPassType::Forward],
-                ],
-                // Only the camera offset changes
-                &[camera_buffer_offset as u32],
-            );
+            let mut cur_pipeline = vk::Pipeline::null();
+            let mut cur_layout = vk::PipelineLayout::null(); // shouldn't change but we will need it
+                                                             // TODO sort by pipeline
             for m in self.scene_tree.iter() {
+                let mat_handle = m.material;
+                let mat = self.material_system.get_material_by_handle(mat_handle)?;
+                let effect = self
+                    .material_system
+                    .get_effect_template_by_handle(mat.original)?;
+                if cur_pipeline != effect.pass_shaders[MeshPassType::Forward].pipeline {
+                    cur_pipeline = effect.pass_shaders[MeshPassType::Forward].pipeline;
+                    cur_layout = effect.pass_shaders[MeshPassType::Forward].layout;
+
+                    self.context.device.cmd_bind_pipeline(
+                        *cmd_buf,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        cur_pipeline,
+                    );
+
+                    self.context.device.cmd_bind_descriptor_sets(
+                        *cmd_buf,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        cur_layout,
+                        0,
+                        &[self.descriptor_set_camera, self.descriptor_set_lights],
+                        // Only the camera offset changes
+                        &[camera_buffer_offset as u32],
+                    );
+
+                    self.context
+                        .device
+                        .cmd_set_viewport(*cmd_buf, 0, &viewports);
+                    self.context.device.cmd_set_scissor(*cmd_buf, 0, &scissors);
+                }
+
+                self.context.device.cmd_bind_descriptor_sets(
+                    *cmd_buf,
+                    vk::PipelineBindPoint::GRAPHICS,
+                    cur_layout,
+                    2,
+                    &[mat.pass_sets[MeshPassType::Forward]],
+                    &[],
+                );
                 let buf = m.get_buffer();
                 let inner_buf = buf.get_buffer();
                 self.context
@@ -647,7 +617,6 @@ impl Renderer {
                 self.buffer_manager.clone(),
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
-                &self.swapchain,
                 &mut self.descriptor_layout_cache,
                 &mut self.descriptor_allocator,
                 &mut self.material_system,
@@ -982,9 +951,6 @@ impl Drop for Renderer {
                 .queue_free(None)
                 .expect("Invalid Handle?!");
             self.light_buffer
-                .queue_free(None)
-                .expect("Invalid Handle?!");
-            self.uniform_buffer_2
                 .queue_free(None)
                 .expect("Invalid Handle?!");
             self.texture_storage
