@@ -513,7 +513,7 @@ impl Renderer {
                 let mesh = self
                     .meshs
                     .get_mesh(m.mesh)
-                    .ok_or(RendererError::InvalidHandle(InvalidHandle))?;
+                    .ok_or::<RendererError>(InvalidHandle.into())?;
                 mesh.draw(&self.context.device, *cmd_buf);
             }
             self.text.draw(

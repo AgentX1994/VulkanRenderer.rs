@@ -10,7 +10,7 @@ use spirv_reflect::types::ReflectDescriptorType;
 // To avoid a naming conflict
 use spirv_reflect::ShaderModule as ShaderModuleReflection;
 
-use super::error::{InvalidHandle, RendererError};
+use super::error::{InvalidHandle, RendererError, SpirvError};
 use super::utils::{Handle, HandleArray};
 use super::RendererResult;
 
@@ -127,12 +127,12 @@ impl ShaderEffect {
             let spv_module = {
                 let module = shader_cache.get_shader_module_by_handle(shader_stage.handle)?;
                 ShaderModuleReflection::load_u32_data(&module.code)
-                    .map_err(RendererError::SpirvError)?
+                    .map_err::<RendererError, _>(|e| SpirvError(e).into())?
             };
 
             for set in spv_module
                 .enumerate_descriptor_sets(None)
-                .map_err(RendererError::SpirvError)?
+                .map_err::<RendererError, _>(|e| SpirvError(e).into())?
             {
                 let mut layout = DescriptorSetLayoutData {
                     set: set.set,
@@ -145,7 +145,7 @@ impl ShaderEffect {
                 for binding in set.bindings {
                     let mut desc_type = match binding.descriptor_type {
                         ReflectDescriptorType::Undefined => {
-                            return Err(RendererError::SpirvError("Unknown Descriptor Type"))
+                            return Err(SpirvError("Unknown Descriptor Type").into())
                         }
                         ReflectDescriptorType::Sampler => vk::DescriptorType::SAMPLER,
                         ReflectDescriptorType::CombinedImageSampler => {
@@ -208,7 +208,7 @@ impl ShaderEffect {
             // TODO Assuming only one push constance block per shader
             if let Some(push_constant) = spv_module
                 .enumerate_push_constant_blocks(None)
-                .map_err(RendererError::SpirvError)?
+                .map_err::<RendererError, _>(|e| SpirvError(e).into())?
                 .first()
             {
                 constant_ranges.push(vk::PushConstantRange {
@@ -360,7 +360,7 @@ impl ShaderCache {
     ) -> RendererResult<Handle<ShaderModule>> {
         match self.module_cache.get(path.as_ref()) {
             Some(handle) => Ok(*handle),
-            None => Err(RendererError::InvalidHandle(InvalidHandle)),
+            None => Err(InvalidHandle.into()),
         }
     }
 
@@ -368,9 +368,7 @@ impl ShaderCache {
         &self,
         handle: Handle<ShaderModule>,
     ) -> RendererResult<&ShaderModule> {
-        self.module_handles
-            .get(handle)
-            .ok_or(RendererError::InvalidHandle(InvalidHandle))
+        self.module_handles.get(handle).ok_or(InvalidHandle.into())
     }
 
     pub fn build_effect(
@@ -400,9 +398,7 @@ impl ShaderCache {
         &self,
         handle: Handle<ShaderEffect>,
     ) -> RendererResult<&ShaderEffect> {
-        self.effects_handles
-            .get(handle)
-            .ok_or(RendererError::InvalidHandle(InvalidHandle))
+        self.effects_handles.get(handle).ok_or(InvalidHandle.into())
     }
 
     pub fn destroy(&mut self, device: &ash::Device) {

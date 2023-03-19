@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 
 use super::{
     buffer::{Buffer, BufferManager},
-    error::{InvalidHandle, RendererError},
+    error::InvalidHandle,
     mesh::Mesh,
     utils::{Handle, HandleArray},
     RendererResult,
@@ -179,7 +179,7 @@ impl SceneTree {
             obj.update_instance(allocator)?;
             obj.children.clone()
         } else {
-            return Err(RendererError::InvalidHandle(InvalidHandle));
+            return Err(InvalidHandle.into());
         };
 
         for handle in children_handles {

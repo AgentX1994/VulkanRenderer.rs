@@ -1,3 +1,4 @@
+use std::backtrace::Backtrace;
 use std::error;
 use std::fmt;
 use std::io;
@@ -5,6 +6,8 @@ use std::num::{ParseFloatError, ParseIntError};
 
 use ash::vk;
 use gpu_allocator::AllocationError;
+
+use thiserror::Error;
 
 #[derive(Debug, Clone, Copy)]
 pub struct InvalidHandle;
@@ -19,100 +22,131 @@ impl error::Error for InvalidHandle {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+pub struct FontError(pub &'static str);
+
+impl fmt::Display for FontError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "font error: {}", self.0)
+    }
+}
+
+impl error::Error for FontError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl From<&'static str> for FontError {
+    fn from(value: &'static str) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SpirvError(pub &'static str);
+
+impl fmt::Display for SpirvError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "spirv error: {}", self.0)
+    }
+}
+
+impl error::Error for SpirvError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl From<&'static str> for SpirvError {
+    fn from(value: &'static str) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MissingTemplate(pub String);
+
+impl fmt::Display for MissingTemplate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Missing Template error: {}", self.0)
+    }
+}
+
+impl error::Error for MissingTemplate {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        None
+    }
+}
+
+impl From<String> for MissingTemplate {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+#[derive(Error, Debug)]
 pub enum RendererError {
-    LoadError(ash::LoadingError),
-    VulkanError(vk::Result),
-    AllocationError(AllocationError),
-    InvalidHandle(InvalidHandle),
-    IoError(io::Error),
-    FontError(&'static str),
-    FloatParseError(ParseFloatError),
-    IntParseError(ParseIntError),
-    SpirvError(&'static str),
-    MissingTemplate(String),
-}
-
-impl fmt::Display for RendererError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match *self {
-            RendererError::LoadError(ref e) => e.fmt(f),
-            RendererError::VulkanError(ref e) => e.fmt(f),
-            RendererError::AllocationError(ref e) => e.fmt(f),
-            RendererError::InvalidHandle(ref e) => e.fmt(f),
-            RendererError::IoError(ref e) => e.fmt(f),
-            RendererError::FontError(ref e) => e.fmt(f),
-            RendererError::FloatParseError(ref e) => e.fmt(f),
-            RendererError::IntParseError(ref e) => e.fmt(f),
-            RendererError::SpirvError(ref e) => write!(f, "SPIRV Reflection error: {}", e),
-            RendererError::MissingTemplate(ref e) => write!(f, "No such format: {}", e),
-        }
-    }
-}
-
-impl error::Error for RendererError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match *self {
-            RendererError::LoadError(ref e) => Some(e),
-            RendererError::VulkanError(ref e) => Some(e),
-            RendererError::AllocationError(ref e) => Some(e),
-            RendererError::InvalidHandle(ref e) => Some(e),
-            RendererError::IoError(ref e) => Some(e),
-            RendererError::FontError(_) => None, // Why fontdue???
-            RendererError::FloatParseError(ref e) => Some(e),
-            RendererError::IntParseError(ref e) => Some(e),
-            RendererError::SpirvError(_) => None, // Why spirv_reflect???
-            RendererError::MissingTemplate(_) => None, // Why me???
-        }
-    }
-}
-
-impl From<ash::LoadingError> for RendererError {
-    fn from(e: ash::LoadingError) -> RendererError {
-        RendererError::LoadError(e)
-    }
-}
-
-impl From<vk::Result> for RendererError {
-    fn from(e: vk::Result) -> RendererError {
-        RendererError::VulkanError(e)
-    }
-}
-
-impl From<AllocationError> for RendererError {
-    fn from(e: AllocationError) -> Self {
-        RendererError::AllocationError(e)
-    }
-}
-
-impl From<InvalidHandle> for RendererError {
-    fn from(e: InvalidHandle) -> Self {
-        RendererError::InvalidHandle(e)
-    }
-}
-
-impl From<io::Error> for RendererError {
-    fn from(e: io::Error) -> Self {
-        RendererError::IoError(e)
-    }
-}
-
-impl From<&'static str> for RendererError {
-    fn from(e: &'static str) -> Self {
-        RendererError::FontError(e)
-    }
-}
-
-impl From<ParseFloatError> for RendererError {
-    fn from(e: ParseFloatError) -> Self {
-        RendererError::FloatParseError(e)
-    }
-}
-
-impl From<ParseIntError> for RendererError {
-    fn from(e: ParseIntError) -> Self {
-        RendererError::IntParseError(e)
-    }
+    #[error("Unable to load Vulkan")]
+    LoadError {
+        #[from]
+        source: ash::LoadingError,
+        backtrace: Backtrace,
+    },
+    #[error("Vulkan error")]
+    VulkanError {
+        #[from]
+        source: vk::Result,
+        backtrace: Backtrace,
+    },
+    #[error("Unable to allocate memory")]
+    AllocationError {
+        #[from]
+        source: AllocationError,
+        backtrace: Backtrace,
+    },
+    #[error("Invalid handle")]
+    InvalidHandle {
+        #[from]
+        source: InvalidHandle,
+        backtrace: Backtrace,
+    },
+    #[error("IO Error")]
+    IoError {
+        #[from]
+        source: io::Error,
+        backtrace: Backtrace,
+    },
+    #[error("Font Error")]
+    FontError {
+        #[from]
+        source: FontError,
+        backtrace: Backtrace,
+    },
+    #[error("Error parsing float")]
+    FloatParseError {
+        #[from]
+        source: ParseFloatError,
+        backtrace: Backtrace,
+    },
+    #[error("Error parsing int")]
+    IntParseError {
+        #[from]
+        source: ParseIntError,
+        backtrace: Backtrace,
+    },
+    #[error("Error loading SPIR-V")]
+    SpirvError {
+        #[from]
+        source: SpirvError,
+        backtrace: Backtrace,
+    },
+    #[error("Missing Material Templte")]
+    MissingTemplate {
+        #[from]
+        source: MissingTemplate,
+        backtrace: Backtrace,
+    },
 }
 
 pub type RendererResult<T> = Result<T, RendererError>;

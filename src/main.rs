@@ -335,7 +335,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let result = renderer.render(&camera);
             match result {
                 Ok(_) => {}
-                Err(RendererError::VulkanError(ash::vk::Result::ERROR_OUT_OF_DATE_KHR)) => {} // Resize request will update swapchain
+                Err(RendererError::VulkanError {
+                    source: ash::vk::Result::ERROR_OUT_OF_DATE_KHR,
+                    ..
+                }) => {} // Resize request will update swapchain
                 _ => result.expect("render error"),
             }
         }

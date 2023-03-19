@@ -10,6 +10,7 @@ use gpu_allocator::MemoryLocation;
 use log::error;
 use memoffset::offset_of;
 
+use super::error::FontError;
 use super::{
     buffer::{Buffer, BufferManager},
     descriptor::{DescriptorAllocator, DescriptorLayoutCache},
@@ -189,7 +190,8 @@ impl TextHandler {
     pub fn new<P: AsRef<std::path::Path>>(font_path: P) -> RendererResult<TextHandler> {
         let font_name = font_path.as_ref().to_string_lossy().into_owned();
         let font_data = std::fs::read(font_path)?;
-        let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())?;
+        let font = fontdue::Font::from_bytes(font_data, fontdue::FontSettings::default())
+            .map_err::<RendererError, _>(|s| FontError(s.into()).into())?;
 
         Ok(TextHandler {
             vertex_data: HashMap::new(),
@@ -483,7 +485,7 @@ impl TextHandler {
             vert_data.destroy();
             Ok(())
         } else {
-            Err(RendererError::InvalidHandle(InvalidHandle))
+            Err(InvalidHandle.into())
         }
     }
 

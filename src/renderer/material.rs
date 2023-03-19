@@ -11,7 +11,7 @@ use itertools::Itertools;
 use super::{
     buffer::{BufferManager, InternalBuffer},
     descriptor::{DescriptorAllocator, DescriptorBuilder, DescriptorLayoutCache},
-    error::{InvalidHandle, RendererError},
+    error::{InvalidHandle, MissingTemplate, RendererError},
     shaders::{ShaderCache, ShaderEffect},
     text::TextVertexData,
     texture::{Texture, TextureStorage},
@@ -109,7 +109,7 @@ impl PipelineBuilder {
                 )
                 .map_err(|(_pipelines, err)| {
                     // TODO delete created pipelines on error?
-                    RendererError::VulkanError(err)
+                    err.into()
                 })
                 .map(|vec| vec[0])
         }
@@ -165,7 +165,7 @@ impl ComputePipelineBuilder {
         let pipelines = unsafe {
             device
                 .create_compute_pipelines(vk::PipelineCache::null(), &[*create_info], None)
-                .map_err(|(_, err)| RendererError::VulkanError(err))?
+                .map_err::<RendererError, _>(|(_, err)| err.into())?
         };
         Ok(pipelines[0])
     }
@@ -439,9 +439,7 @@ impl MaterialSystem {
                     let res = self.template_cache.get(&info.base_template);
                     match res {
                         Some(handle) => *handle,
-                        None => {
-                            return Err(RendererError::MissingTemplate(info.base_template.clone()))
-                        }
+                        None => return Err(MissingTemplate(info.base_template.clone()).into()),
                     }
                 };
                 let mut new_mat = Material {
@@ -507,14 +505,14 @@ impl MaterialSystem {
     ) -> RendererResult<Handle<Material>> {
         match self.materials.get(material_name.as_ref()) {
             Some(handle) => Ok(*handle),
-            None => Err(RendererError::InvalidHandle(InvalidHandle)),
+            None => Err(InvalidHandle.into()),
         }
     }
 
     pub fn get_material_by_handle(&self, handle: Handle<Material>) -> RendererResult<&Material> {
         self.materials_handles
             .get(handle)
-            .ok_or(RendererError::InvalidHandle(InvalidHandle))
+            .ok_or(InvalidHandle.into())
     }
 
     pub fn get_effect_template_handle<S: AsRef<str>>(
@@ -523,7 +521,7 @@ impl MaterialSystem {
     ) -> RendererResult<Handle<EffectTemplate>> {
         match self.template_cache.get(template_name.as_ref()) {
             Some(handle) => Ok(*handle),
-            None => Err(RendererError::InvalidHandle(InvalidHandle)),
+            None => Err(InvalidHandle.into()),
         }
     }
 
@@ -533,7 +531,7 @@ impl MaterialSystem {
     ) -> RendererResult<&EffectTemplate> {
         self.effect_template_handles
             .get(handle)
-            .ok_or(RendererError::InvalidHandle(InvalidHandle))
+            .ok_or(InvalidHandle.into())
     }
 
     pub fn fill_builders(&mut self) {
