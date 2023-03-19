@@ -381,7 +381,29 @@ impl VulkanContext {
             }
             vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => {
                 let bt = backtrace::Backtrace::new();
-                warn!("Vulkan: {}: {:?}\n {:?}", ty, message_str, bt);
+
+                // TODO control filtering through a config variable?
+                let mut frames = vec![];
+                for frame in bt.frames() {
+                    if frame.symbols().iter().any(|sym| {
+                        if let Some(name) = sym.name() {
+                            if let Some(name_str) = name.as_str() {
+                                name_str.contains("vulkan")
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }) {
+                        frames.push(frame.clone());
+                    }
+                }
+                let bt: backtrace::Backtrace = frames.into();
+                error!(
+                    "Vulkan: {}: {:?} - Filtered Backtrace:\n{:?}",
+                    ty, message_str, bt
+                );
             }
             _ => {
                 error!(
