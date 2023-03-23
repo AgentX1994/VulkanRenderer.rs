@@ -7,7 +7,7 @@ use nalgebra_glm as glm;
 
 use super::{
     buffer::{Buffer, BufferManager},
-    error::InvalidHandle,
+    error::{InvalidHandle, RendererError},
     material::Material,
     mesh::Mesh,
     utils::{Handle, HandleArray},
@@ -53,18 +53,14 @@ pub struct SceneObject {
     global_transform: glm::Mat4,
     instance_buffer: Buffer,
 
-    pub parent: Option<Handle<SceneObject>>,
-    pub children: Vec<Handle<SceneObject>>,
+    parent: Option<Handle<SceneObject>>,
+    children: Vec<Handle<SceneObject>>,
 }
 
 impl SceneObject {
     fn update_instance(&mut self, allocator: &mut Allocator) -> RendererResult<()> {
         self.instance_buffer
             .fill(allocator, self.instance_data.as_slice())
-    }
-
-    pub fn add_child(&mut self, child: Handle<SceneObject>) {
-        todo!()
     }
 
     pub fn get_buffer(&self) -> &Buffer {
@@ -98,7 +94,20 @@ impl<'a> Drop for SceneObjectMutGuard<'a> {
     }
 }
 
-impl<'a> SceneObjectMutGuard<'a> {}
+impl<'a> SceneObjectMutGuard<'a> {
+    pub fn add_child(&mut self, child: Handle<SceneObject>) -> RendererResult<()> {
+        let scene_tree = unsafe { self.scene_tree.as_mut().expect("Null scene tree pointer? ") };
+        {
+            let child_obj = scene_tree
+                .get_object_mut(child, self.allocator)
+                .ok_or::<RendererError>(InvalidHandle.into())?;
+            child_obj.object.parent = Some(self.object_handle);
+        }
+        self.object.children.push(child);
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct SceneTree {
@@ -174,7 +183,7 @@ impl SceneTree {
                 * glm::quat_to_mat4(&obj.rotation)
                 * glm::scaling(&obj.scaling);
             if let Some(parent_transf) = &parent_transform {
-                obj.global_transform = obj.transform * *parent_transf;
+                obj.global_transform = *parent_transf * obj.transform;
             } else {
                 obj.global_transform = obj.transform;
             }

@@ -118,7 +118,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         panic!("No allocator!");
     };
-    {
+    let car_base_position = glm::Vec3::new(0f32, 15f32, 20f32);
+    let car_handle = {
         if let Some(allo) = &mut renderer.allocator {
             // allocate uniform buffer
             let mut buffer = BufferManager::new_buffer(
@@ -147,6 +148,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 mat_data,
             )?;
             bufs.push(buffer);
+            let child_object = {
+                let h = renderer.scene_tree.new_object(
+                    sphere,
+                    material_handle,
+                    &renderer.context.device,
+                    allo,
+                    renderer.buffer_manager.clone(),
+                )?;
+                let obj_ref = renderer
+                    .scene_tree
+                    .get_object_mut(h, allo)
+                    .expect("We were given an invalid handle");
+                obj_ref.object.position = glm::Vec3::new(0f32, 0f32, 65f32);
+                obj_ref.object.scaling = glm::Vec3::new(10.0f32, 10.0f32, 10.0f32);
+                h
+            };
             let new_object = renderer.scene_tree.new_object(
                 car_model,
                 material_handle,
@@ -155,22 +172,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 renderer.buffer_manager.clone(),
             )?;
             {
-                let obj_ref = renderer
+                let mut obj_ref = renderer
                     .scene_tree
                     .get_object_mut(new_object, allo)
                     .expect("We were given an invalid handle");
-                obj_ref.object.position = glm::Vec3::new(0f32, 15f32, 20f32);
+                obj_ref.object.position = car_base_position;
                 obj_ref.object.scaling = glm::Vec3::new(0.1f32, 0.1f32, 0.1f32);
                 obj_ref.object.rotation = glm::Quat::from_polar_decomposition(
                     1.0f32,
                     std::f32::consts::FRAC_2_PI,
                     na::Unit::<glm::Vec3>::new_normalize(glm::Vec3::new(1.0f32, 0.0f32, 0.0f32)),
                 );
+                obj_ref.add_child(child_object)?;
             }
+            new_object
         } else {
             panic!("No allocator!");
         }
-    }
+    };
 
     let mut lights = LightManager::default();
     lights.add_light(DirectionalLight {
@@ -236,6 +255,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &[&fontdue::layout::TextStyle::new("FPS: 0000.00", 20.0, 0)],
         [1.0, 1.0, 1.0],
     )?;
+    let start_time = std::time::SystemTime::now();
     event_loop.run(move |event, _, controlflow| match event {
         Event::WindowEvent {
             event: WindowEvent::Resized(size),
@@ -407,6 +427,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if turn_left_pressed {
                 camera.turn_left(turn_speed);
+            }
+            {
+                if let Some(allo) = &mut renderer.allocator {
+                    let obj_ref = renderer
+                        .scene_tree
+                        .get_object_mut(car_handle, allo)
+                        .expect("Could not get car obj mut ref");
+                    obj_ref.object.position = glm::Vec3::new(
+                        car_base_position.x,
+                        car_base_position.y,
+                        car_base_position.z
+                            + start_time
+                                .elapsed()
+                                .expect("Could not get elapsed time")
+                                .as_secs_f32()
+                                .sin()
+                                * 5.0f32,
+                    );
+                }
             }
             let result = renderer.render(&camera);
             match result {
