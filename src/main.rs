@@ -1,3 +1,5 @@
+use std::ops::DerefMut;
+
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use log::info;
@@ -29,17 +31,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tex3_handle = renderer.new_texture_from_file("texture3.jpg")?;
     let tex4_handle = renderer.new_texture_from_file("plain_white.jpg")?;
 
-    let sphere = if let Some(allo) = &mut renderer.allocator {
+    let sphere = if let Ok(mut allo) = renderer.allocator.lock() {
         renderer.meshs.new_sphere_mesh(
             3,
             &renderer.context.device,
-            allo,
+            allo.deref_mut(),
             renderer.buffer_manager.clone(),
         )?
     } else {
         panic!("No allocator!");
     };
-    let mut bufs = vec![];
 
     for i in 0..10 {
         for j in 0..10 {
@@ -56,18 +57,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 _ => unreachable!(),
             };
 
-            if let Some(allo) = &mut renderer.allocator {
+            if let Ok(mut allo) = renderer.allocator.lock() {
                 // allocate uniform buffer
                 let mut buffer = BufferManager::new_buffer(
                     renderer.buffer_manager.clone(),
                     &renderer.context.device,
-                    allo,
+                    allo.deref_mut(),
                     2 * 4,
                     vk::BufferUsageFlags::UNIFORM_BUFFER,
                     MemoryLocation::CpuToGpu,
+                    format!("uniforms-sphere-{}-{}", i, j).as_str(),
                 )?;
                 let material_data = [metallic, roughness];
-                buffer.fill(allo, &material_data)?;
+                buffer.fill(allo.deref_mut(), &material_data)?;
                 let mat_data = MaterialData {
                     textures: vec![tex_handle],
                     buffers: vec![buffer.get_handle()],
@@ -84,19 +86,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     mat_name.as_str(),
                     mat_data,
                 )?;
-                bufs.push(buffer);
+                renderer.material_uniform_buffers.push(buffer);
 
                 let new_object = renderer.scene_tree.new_object(
                     sphere,
                     material_handle,
                     &renderer.context.device,
-                    allo,
+                    allo.deref_mut(),
                     renderer.buffer_manager.clone(),
                 )?;
                 {
                     let obj_ref = renderer
                         .scene_tree
-                        .get_object_mut(new_object, allo)
+                        .get_object_mut(new_object, allo.deref_mut())
                         .expect("We were given an invalid handle");
                     obj_ref.object.position = translation;
                     obj_ref.object.scaling = glm::Vec3::new(scale, scale, scale);
@@ -108,11 +110,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Try loading an obj model
-    let car_model = if let Some(allo) = &mut renderer.allocator {
+    let car_model = if let Ok(mut allo) = renderer.allocator.lock() {
         renderer.meshs.new_mesh_from_obj(
             "models/alfa147.obj",
             &renderer.context.device,
-            allo,
+            allo.deref_mut(),
             renderer.buffer_manager.clone(),
         )?
     } else {
@@ -120,18 +122,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let car_base_position = glm::Vec3::new(0f32, 15f32, 20f32);
     let car_handle = {
-        if let Some(allo) = &mut renderer.allocator {
+        if let Ok(mut allo) = renderer.allocator.lock() {
             // allocate uniform buffer
             let mut buffer = BufferManager::new_buffer(
                 renderer.buffer_manager.clone(),
                 &renderer.context.device,
-                allo,
+                allo.deref_mut(),
                 2 * 4,
                 vk::BufferUsageFlags::UNIFORM_BUFFER,
                 MemoryLocation::CpuToGpu,
+                "uniforms-car",
             )?;
             let material_data = [0.8f32, 0.1f32];
-            buffer.fill(allo, &material_data)?;
+            buffer.fill(allo.deref_mut(), &material_data)?;
             let mat_data = MaterialData {
                 textures: vec![tex4_handle],
                 buffers: vec![buffer.get_handle()],
@@ -147,18 +150,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "car_material",
                 mat_data,
             )?;
-            bufs.push(buffer);
+            renderer.material_uniform_buffers.push(buffer);
             let child_object = {
                 let h = renderer.scene_tree.new_object(
                     sphere,
                     material_handle,
                     &renderer.context.device,
-                    allo,
+                    allo.deref_mut(),
                     renderer.buffer_manager.clone(),
                 )?;
                 let obj_ref = renderer
                     .scene_tree
-                    .get_object_mut(h, allo)
+                    .get_object_mut(h, allo.deref_mut())
                     .expect("We were given an invalid handle");
                 obj_ref.object.position = glm::Vec3::new(0f32, 0f32, 65f32);
                 obj_ref.object.scaling = glm::Vec3::new(10.0f32, 10.0f32, 10.0f32);
@@ -168,13 +171,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 car_model,
                 material_handle,
                 &renderer.context.device,
-                allo,
+                allo.deref_mut(),
                 renderer.buffer_manager.clone(),
             )?;
             {
                 let mut obj_ref = renderer
                     .scene_tree
-                    .get_object_mut(new_object, allo)
+                    .get_object_mut(new_object, allo.deref_mut())
                     .expect("We were given an invalid handle");
                 obj_ref.object.position = car_base_position;
                 obj_ref.object.scaling = glm::Vec3::new(0.1f32, 0.1f32, 0.1f32);
@@ -275,9 +278,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } => {
             running = false;
             *controlflow = winit::event_loop::ControlFlow::Exit;
-            for buf in bufs.iter_mut() {
-                buf.queue_free(None).expect("Could not queue buf for free")
-            }
         }
         Event::WindowEvent {
             event:
@@ -367,9 +367,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             winit::event::VirtualKeyCode::Escape => {
                 running = false;
                 *controlflow = winit::event_loop::ControlFlow::Exit;
-                for buf in bufs.iter_mut() {
-                    buf.queue_free(None).expect("Could not queue buf for free")
-                }
             }
             _ => {}
         },
@@ -429,10 +426,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 camera.turn_left(turn_speed);
             }
             {
-                if let Some(allo) = &mut renderer.allocator {
+                if let Ok(mut allo) = renderer.allocator.lock() {
                     let obj_ref = renderer
                         .scene_tree
-                        .get_object_mut(car_handle, allo)
+                        .get_object_mut(car_handle, allo.deref_mut())
                         .expect("Could not get car obj mut ref");
                     obj_ref.object.position = glm::Vec3::new(
                         car_base_position.x,

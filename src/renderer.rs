@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -68,8 +69,10 @@ impl Drop for FrameData {
 
 pub struct Renderer {
     dropped: bool,
+    // This has to be first, so that it is dropped first
+    // TODO do this better?
+    pub allocator: Arc<Mutex<Allocator>>,
     pub context: VulkanContext,
-    pub allocator: Option<Allocator>,
     pub buffer_manager: Arc<Mutex<BufferManager>>,
     swapchain: Swapchain,
     render_pass: vk::RenderPass,
@@ -90,6 +93,7 @@ pub struct Renderer {
     pub texture_storage: TextureStorage,
     pub text: TextHandler,
     pub meshs: MeshManager,
+    pub material_uniform_buffers: Vec<Buffer>,
 }
 
 impl Renderer {
@@ -189,7 +193,7 @@ impl Renderer {
             debug_settings: gpu_allocator::AllocatorDebugSettings {
                 log_memory_information: true,
                 log_leaks_on_shutdown: true,
-                store_stack_traces: false,
+                store_stack_traces: true,
                 log_allocations: true,
                 log_frees: true,
                 log_stack_traces: false,
@@ -251,6 +255,7 @@ impl Renderer {
                 * swapchain.get_actual_image_count() as usize) as u64,
             vk::BufferUsageFlags::UNIFORM_BUFFER,
             MemoryLocation::CpuToGpu,
+            "main-uniforms",
         )?;
         for i in 0..swapchain.get_actual_image_count() as usize {
             let offset = i * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
@@ -265,6 +270,7 @@ impl Renderer {
             8,
             vk::BufferUsageFlags::STORAGE_BUFFER,
             MemoryLocation::CpuToGpu,
+            "lights",
         )?;
         light_buffer.fill(&mut allocator, &[0.0f32; 2])?;
 
@@ -310,7 +316,7 @@ impl Renderer {
         Ok(Renderer {
             dropped: false,
             context,
-            allocator: Some(allocator),
+            allocator: Arc::new(Mutex::new(allocator)),
             buffer_manager,
             swapchain,
             graphics_command_pool,
@@ -331,6 +337,7 @@ impl Renderer {
             texture_storage,
             text,
             meshs: Default::default(),
+            material_uniform_buffers: Default::default(),
         })
     }
 
@@ -339,12 +346,12 @@ impl Renderer {
             self.context.device.device_wait_idle()?;
         }
         self.context.refresh_surface_data()?;
-        if let Some(allo) = &mut self.allocator {
+        if let Ok(mut allo) = self.allocator.lock() {
             let old_image_count = self.swapchain.get_actual_image_count();
-            self.swapchain.destroy(&self.context, allo);
+            self.swapchain.destroy(&self.context, allo.deref_mut());
             self.swapchain = Swapchain::new(
                 &self.context,
-                allo,
+                allo.deref_mut(),
                 self.swapchain.get_image_format(),
                 width,
                 height,
@@ -543,20 +550,20 @@ impl Renderer {
             vk::Fence::null(),
         )?;
 
-        if let Some(alloc) = &mut self.allocator {
+        if let Ok(mut alloc) = self.allocator.lock() {
             let offset = image_index as usize * std::mem::size_of::<[[[f32; 4]; 4]; 2]>();
-            camera.update_buffer(alloc, &mut self.uniform_buffer, offset)?;
+            camera.update_buffer(alloc.deref_mut(), &mut self.uniform_buffer, offset)?;
         } else {
             panic!("No allocator!");
         }
 
         self.wait_for_image_fence_and_set_new_fence(image_index as usize)?;
 
-        if let Some(allo) = &mut self.allocator {
+        if let Ok(mut allo) = self.allocator.lock() {
             self.buffer_manager
                 .lock()
                 .unwrap()
-                .free_queued(allo, image_index);
+                .free_queued(allo.deref_mut(), image_index);
         }
 
         self.submit_commands(image_index as usize)?;
@@ -567,10 +574,10 @@ impl Renderer {
     }
 
     pub fn update_storage_from_lights(&mut self, lights: &LightManager) -> RendererResult<()> {
-        if let Some(alloc) = &mut self.allocator {
+        if let Ok(mut allo) = self.allocator.lock() {
             Ok(lights.update_buffer(
                 &self.context.device,
-                alloc,
+                allo.deref_mut(),
                 &mut self.light_buffer,
                 self.descriptor_set_lights,
             )?)
@@ -583,11 +590,11 @@ impl Renderer {
         &mut self,
         path: P,
     ) -> RendererResult<Handle<Texture>> {
-        if let Some(allo) = &mut self.allocator {
+        if let Ok(mut allo) = self.allocator.lock() {
             Ok(self.texture_storage.new_texture_from_file(
                 path,
                 &self.context.device,
-                allo,
+                allo.deref_mut(),
                 self.buffer_manager.clone(),
                 self.graphics_command_pool,
                 self.context.graphics_queue.queue,
@@ -604,7 +611,7 @@ impl Renderer {
         styles: &[&fontdue::layout::TextStyle],
         color: [f32; 3],
     ) -> RendererResult<Vec<usize>> {
-        if let Some(allo) = &mut self.allocator {
+        if let Ok(mut allo) = self.allocator.lock() {
             self.text.add_text(
                 styles,
                 color,
@@ -613,7 +620,7 @@ impl Renderer {
                 &self.context.max_texture_extent,
                 &self.context.device,
                 &mut self.texture_storage,
-                allo,
+                allo.deref_mut(),
                 self.buffer_manager.clone(),
                 &self.graphics_command_pool,
                 &self.context.graphics_queue.queue,
@@ -670,8 +677,8 @@ impl Renderer {
                 .get_image_memory_requirements(dest_image)
         };
 
-        let dest_image_allocation = if let Some(allocator) = &mut self.allocator {
-            allocator.allocate(&AllocationCreateDesc {
+        let dest_image_allocation = if let Ok(mut allo) = self.allocator.lock() {
+            allo.allocate(&AllocationCreateDesc {
                 name: "dest_image",
                 requirements: reqs,
                 location: MemoryLocation::GpuToCpu,
@@ -893,7 +900,7 @@ impl Renderer {
                 );
                 data.set_len(subresource_layout.size as usize);
             }
-            if let Some(allo) = &mut self.allocator {
+            if let Ok(mut allo) = self.allocator.lock() {
                 allo.free(dest_image_allocation)
                     .expect("Could not free dest image");
             }
@@ -944,8 +951,6 @@ impl Drop for Renderer {
                 .device
                 .device_wait_idle()
                 .expect("Something wrong while waiting for idle");
-
-            let mut allocator = self.allocator.take().expect("We had no allocator?!");
             self.meshs.destroy();
             self.uniform_buffer
                 .queue_free(None)
@@ -953,35 +958,43 @@ impl Drop for Renderer {
             self.light_buffer
                 .queue_free(None)
                 .expect("Invalid Handle?!");
-            self.texture_storage
-                .clean_up(&self.context.device, &mut allocator);
 
-            self.frame_data.clear();
-            self.context
-                .device
-                .destroy_command_pool(self.graphics_command_pool, None);
-            // device.destroy_command_pool(command_pool_transfer, None);
-            self.text.destroy();
-            self.context
-                .device
-                .destroy_render_pass(self.render_pass, None);
-            let num_images = self.swapchain.get_actual_image_count();
-            self.material_system.destroy(&self.context.device);
-            self.shader_cache.destroy(&self.context.device);
-            self.swapchain.destroy(&self.context, &mut allocator);
+            if let Ok(mut allo) = self.allocator.lock() {
+                let allo = allo.deref_mut();
+                self.texture_storage.clean_up(&self.context.device, allo);
 
-            self.scene_tree.destroy();
+                self.frame_data.clear();
+                self.context
+                    .device
+                    .destroy_command_pool(self.graphics_command_pool, None);
+                // device.destroy_command_pool(command_pool_transfer, None);
+                self.text.destroy();
+                self.context
+                    .device
+                    .destroy_render_pass(self.render_pass, None);
+                let num_images = self.swapchain.get_actual_image_count();
+                self.material_system.destroy(&self.context.device);
+                self.shader_cache.destroy(&self.context.device);
+                self.swapchain.destroy(&self.context, allo);
 
-            self.descriptor_layout_cache.destroy(&self.context.device);
-            self.descriptor_allocator.destroy(&self.context.device);
+                self.scene_tree.destroy();
 
-            {
-                let mut guard = self.buffer_manager.lock().unwrap();
-                for i in 0..num_images {
-                    guard.free_queued(&mut allocator, i);
+                self.descriptor_layout_cache.destroy(&self.context.device);
+                self.descriptor_allocator.destroy(&self.context.device);
+
+                for buf in self.material_uniform_buffers.iter_mut() {
+                    buf.queue_free(None).expect("Invalid Handle?!");
                 }
+
+                {
+                    let mut guard = self.buffer_manager.lock().unwrap();
+                    for i in 0..num_images {
+                        guard.free_queued(allo, i);
+                    }
+                }
+                allo.report_memory_leaks(log::Level::Warn);
+                log::logger().flush();
             }
-            drop(allocator); // Ensure all memory is freed
         }
         self.dropped = true;
     }

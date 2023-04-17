@@ -130,6 +130,7 @@ impl SceneTree {
             std::mem::size_of::<InstanceData>() as u64,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             MemoryLocation::CpuToGpu,
+            "instance-buffer",
         )?;
         let scene_object = SceneObject {
             mesh,

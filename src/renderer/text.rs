@@ -161,6 +161,7 @@ impl TextBuffer {
             bytes,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             MemoryLocation::CpuToGpu,
+            "text-vertex-buffer",
         )?;
         vertex_buffer.fill(allocator, &vertex_data)?;
         Ok(Self {

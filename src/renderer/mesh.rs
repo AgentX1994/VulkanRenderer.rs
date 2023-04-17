@@ -290,6 +290,7 @@ impl Mesh {
                 bytes as u64,
                 vk::BufferUsageFlags::VERTEX_BUFFER,
                 MemoryLocation::CpuToGpu,
+                "vertex-buffer",
             )?;
             buffer.fill(allocator, &self.vertex_data)?;
             self.vertex_buffer = Some(buffer);
@@ -315,6 +316,7 @@ impl Mesh {
                 bytes as u64,
                 vk::BufferUsageFlags::INDEX_BUFFER,
                 MemoryLocation::CpuToGpu,
+                "index-buffer",
             )?;
             buffer.fill(allocator, &self.index_data)?;
             self.index_buffer = Some(buffer);

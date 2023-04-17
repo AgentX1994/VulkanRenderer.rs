@@ -13,7 +13,7 @@ appenders:
       pattern: "{d} - {h({l})} - {M} - {m}{n}"
 
 root:
-  level: info
+  level: trace
   appenders:
     - stdout
     - file_log

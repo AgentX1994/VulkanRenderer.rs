@@ -24,6 +24,8 @@ itertools = "0.10.5"
 log = "0.4.17"
 log4rs = "1.2.0"
 thiserror = "1.0.40"
+imgui-rs = "1.47.0"
+imgui-rs-vulkan-renderer = { version = "1.9.0", features = ["gpu-allocator"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-metal = "0.3"

@@ -16,6 +16,7 @@ pub struct InternalBuffer {
     size: u64,
     buffer_usage: vk::BufferUsageFlags,
     location: MemoryLocation,
+    name: String,
 }
 
 impl Debug for InternalBuffer {
@@ -38,9 +39,10 @@ impl InternalBuffer {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
+        name: &str,
     ) -> RendererResult<InternalBuffer> {
         let (buffer, allocation) =
-            Self::allocate_buffer(device, allocator, size, buffer_usage, location)?;
+            Self::allocate_buffer(device, allocator, size, buffer_usage, location, name)?;
         Ok(InternalBuffer {
             device: device.clone(),
             allocation: Some(allocation),
@@ -48,6 +50,7 @@ impl InternalBuffer {
             size,
             buffer_usage,
             location,
+            name: name.to_string(),
         })
     }
 
@@ -57,6 +60,7 @@ impl InternalBuffer {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
+        name: &str,
     ) -> RendererResult<(vk::Buffer, Allocation)> {
         let buffer_create_info = vk::BufferCreateInfo::builder()
             .size(size)
@@ -65,7 +69,7 @@ impl InternalBuffer {
         let buffer = unsafe { device.create_buffer(&buffer_create_info, None)? };
         let reqs = unsafe { device.get_buffer_memory_requirements(buffer) };
         let allocation = allocator.allocate(&AllocationCreateDesc {
-            name: "buffer",
+            name: format!("buffer-{}-{}", name, size).as_str(),
             requirements: reqs,
             location,
             linear: true,
@@ -86,6 +90,7 @@ impl InternalBuffer {
                 data_len as u64,
                 self.buffer_usage,
                 self.location,
+                &self.name,
             )?;
             let old_allocation = self.allocation.take().expect("Buffer had no allocation!");
             unsafe {
@@ -119,6 +124,7 @@ impl InternalBuffer {
                 (data_len + offset) as u64,
                 self.buffer_usage,
                 self.location,
+                &self.name,
             )?;
             let old_allocation = self.allocation.take().expect("Buffer had no allocation!");
             unsafe {
@@ -170,8 +176,10 @@ impl BufferManager {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
+        name: &str,
     ) -> RendererResult<Handle<InternalBuffer>> {
-        let internal_buffer = InternalBuffer::new(device, allocator, size, buffer_usage, location)?;
+        let internal_buffer =
+            InternalBuffer::new(device, allocator, size, buffer_usage, location, name)?;
         Ok(self.handle_array.insert(internal_buffer))
     }
 
@@ -182,6 +190,7 @@ impl BufferManager {
         size: u64,
         buffer_usage: vk::BufferUsageFlags,
         location: MemoryLocation,
+        name: &str,
     ) -> RendererResult<Buffer> {
         let handle = manager.lock().unwrap().allocate_new_buffer(
             device,
@@ -189,6 +198,7 @@ impl BufferManager {
             size,
             buffer_usage,
             location,
+            name,
         )?;
         let buffer = Buffer {
             manager: manager.clone(),

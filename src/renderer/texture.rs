@@ -90,6 +90,7 @@ impl Texture {
             data.len() as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
+            "image-copy",
         )?;
         buffer.fill(allocator, &data)?;
 
@@ -285,6 +286,7 @@ impl Texture {
             data.len() as u64,
             vk::BufferUsageFlags::TRANSFER_SRC,
             MemoryLocation::CpuToGpu,
+            "image-from-u8s",
         )?;
         buffer.fill(allocator, data)?;
 
