@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::{vk, Device};
 use gpu_allocator::{
-    vulkan::{Allocation, AllocationCreateDesc, Allocator},
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
 };
 use log::info;
@@ -57,6 +57,7 @@ impl Texture {
             requirements: reqs,
             location: MemoryLocation::GpuOnly,
             linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         })?;
         unsafe {
             device.bind_image_memory(vk_image, allocation.memory(), allocation.offset())?;
@@ -254,6 +255,7 @@ impl Texture {
             requirements: reqs,
             location: MemoryLocation::GpuOnly,
             linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         })?;
 
         // bind memory to image

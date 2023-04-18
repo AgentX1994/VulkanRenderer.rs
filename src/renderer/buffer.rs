@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, Allocator};
+use gpu_allocator::vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator};
 use gpu_allocator::MemoryLocation;
 
 use super::error::InvalidHandle;
@@ -73,6 +73,7 @@ impl InternalBuffer {
             requirements: reqs,
             location,
             linear: true,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         })?;
 
         unsafe {

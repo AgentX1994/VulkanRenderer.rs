@@ -1,6 +1,6 @@
 use ash::vk;
 use gpu_allocator::{
-    vulkan::{Allocation, AllocationCreateDesc, Allocator},
+    vulkan::{Allocation, AllocationCreateDesc, AllocationScheme, Allocator},
     MemoryLocation,
 };
 
@@ -72,6 +72,7 @@ impl RenderTarget {
             requirements: reqs,
             location: MemoryLocation::GpuOnly,
             linear: false,
+            allocation_scheme: AllocationScheme::GpuAllocatorManaged,
         })?;
         unsafe {
             context.device.bind_image_memory(

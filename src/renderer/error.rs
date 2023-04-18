@@ -6,6 +6,7 @@ use std::num::{ParseFloatError, ParseIntError};
 
 use ash::vk;
 use gpu_allocator::AllocationError;
+use imgui_rs_vulkan_renderer::RendererError as ImguiRendererError;
 
 use thiserror::Error;
 
@@ -145,6 +146,12 @@ pub enum RendererError {
     MissingTemplate {
         #[from]
         source: MissingTemplate,
+        backtrace: Backtrace,
+    },
+    #[error("Imgui Render Error")]
+    ImguiRenderError {
+        #[from]
+        source: ImguiRendererError,
         backtrace: Backtrace,
     },
 }

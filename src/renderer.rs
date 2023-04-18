@@ -1,13 +1,18 @@
 use std::ops::DerefMut;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use ash::vk;
 
+use gpu_allocator::vulkan::{
+    AllocationCreateDesc, AllocationScheme, Allocator, AllocatorCreateDesc,
+};
 use gpu_allocator::MemoryLocation;
+use imgui::{Condition, Context, FontConfig, FontSource, Ui};
+use imgui_rs_vulkan_renderer::{Options, Renderer as ImguiRenderer};
+use imgui_winit_support::{HiDpiMode, WinitPlatform};
 use nalgebra_glm as glm;
-
-use gpu_allocator::vulkan::{AllocationCreateDesc, Allocator, AllocatorCreateDesc};
 
 pub mod buffer;
 pub mod camera;
@@ -30,6 +35,8 @@ pub mod vertex;
 use buffer::Buffer;
 use camera::Camera;
 use swapchain::Swapchain;
+use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::window::Window;
 
 use self::buffer::BufferManager;
 use self::context::VulkanContext;
@@ -67,10 +74,18 @@ impl Drop for FrameData {
     }
 }
 
+struct UiState {
+    opened: bool,
+}
+
 pub struct Renderer {
     dropped: bool,
     // This has to be first, so that it is dropped first
     // TODO do this better?
+    imgui_renderer: ImguiRenderer,
+    platform: WinitPlatform,
+    imgui: Context,
+    ui_state: UiState,
     pub allocator: Arc<Mutex<Allocator>>,
     pub context: VulkanContext,
     pub buffer_manager: Arc<Mutex<BufferManager>>,
@@ -94,6 +109,7 @@ pub struct Renderer {
     pub text: TextHandler,
     pub meshs: MeshManager,
     pub material_uniform_buffers: Vec<Buffer>,
+    last_frame: Instant,
 }
 
 impl Renderer {
@@ -179,6 +195,7 @@ impl Renderer {
 
     pub fn new(
         name: &str,
+        window: &Window,
         window_width: u32,
         window_height: u32,
         internal_window: InternalWindow,
@@ -194,8 +211,8 @@ impl Renderer {
                 log_memory_information: true,
                 log_leaks_on_shutdown: true,
                 store_stack_traces: true,
-                log_allocations: true,
-                log_frees: true,
+                log_allocations: false,
+                log_frees: false,
                 log_stack_traces: false,
             },
             buffer_device_address: false,
@@ -313,10 +330,45 @@ impl Renderer {
         let descriptor_set_lights =
             descriptor_allocator.allocate(&context.device, effect.set_layouts[1])?;
 
+        let mut imgui = Context::create();
+        imgui.set_ini_filename(None);
+
+        let mut platform = WinitPlatform::init(&mut imgui);
+
+        let hidpi_factor = platform.hidpi_factor();
+        let font_size = (13.0 * hidpi_factor) as f32;
+        imgui.fonts().add_font(&[FontSource::DefaultFontData {
+            config: Some(FontConfig {
+                size_pixels: font_size,
+                ..FontConfig::default()
+            }),
+        }]);
+        imgui.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+        platform.attach_window(imgui.io_mut(), window, HiDpiMode::Rounded);
+
+        let allocator = Arc::new(Mutex::new(allocator));
+
+        let imgui_renderer = ImguiRenderer::with_gpu_allocator(
+            allocator.clone(),
+            context.device.clone(),
+            context.graphics_queue.queue,
+            graphics_command_pool,
+            render_pass,
+            &mut imgui,
+            Some(Options {
+                in_flight_frames: FRAMES_IN_FLIGHT,
+                ..Default::default()
+            }),
+        )?;
+
         Ok(Renderer {
             dropped: false,
+            allocator,
             context,
-            allocator: Arc::new(Mutex::new(allocator)),
+            imgui,
+            ui_state: UiState { opened: true },
+            platform,
+            imgui_renderer,
             buffer_manager,
             swapchain,
             graphics_command_pool,
@@ -338,7 +390,34 @@ impl Renderer {
             text,
             meshs: Default::default(),
             material_uniform_buffers: Default::default(),
+            last_frame: Instant::now(),
         })
+    }
+
+    pub fn handle_event(&mut self, window: &Window, event: &winit::event::Event<()>) {
+        self.platform
+            .handle_event(self.imgui.io_mut(), window, event);
+        match event {
+            Event::NewEvents(_) => {
+                let now = Instant::now();
+                self.imgui.io_mut().update_delta_time(now - self.last_frame);
+                self.last_frame = now;
+            }
+            Event::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        input:
+                            winit::event::KeyboardInput {
+                                state: ElementState::Pressed,
+                                virtual_keycode: Some(VirtualKeyCode::Grave),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => self.ui_state.opened = true,
+            _ => (),
+        }
     }
 
     pub fn recreate_swapchain(&mut self, width: u32, height: u32) -> RendererResult<()> {
@@ -388,7 +467,12 @@ impl Renderer {
         Ok(())
     }
 
-    fn update_command_buffer(&mut self, image_index: usize) -> RendererResult<()> {
+    fn update_command_buffer<F: FnOnce(&mut Ui)>(
+        &mut self,
+        image_index: usize,
+        window: &Window,
+        ui_func: F,
+    ) -> RendererResult<()> {
         let command_buffer_begin_info = vk::CommandBufferBeginInfo::builder();
         let cmd_buf = &self.command_buffers[image_index];
         let framebuffer = &self.swapchain.get_render_targets()[image_index].framebuffer;
@@ -500,14 +584,42 @@ impl Renderer {
                 self.swapchain.get_extent(),
                 &self.material_system,
             )?;
+
+            // Draw UI
+            self.platform
+                .prepare_frame(self.imgui.io_mut(), window)
+                .expect("Failed to prepare frame");
+            let ui = self.imgui.frame();
+
+            let w = ui
+                .window("Vulkan Renderer")
+                .opened(&mut self.ui_state.opened)
+                .position([20.0, 20.0], Condition::Appearing)
+                .size([700.0, 80.0], Condition::Appearing)
+                .resizable(false);
+            w.build(|| {
+                ui.text("Hello, World!");
+            });
+
+            ui_func(ui);
+
+            self.platform.prepare_render(ui, window);
+            let draw_data = self.imgui.render();
+            self.imgui_renderer.cmd_draw(*cmd_buf, draw_data)?;
+
             self.context.device.cmd_end_render_pass(*cmd_buf);
             self.context.device.end_command_buffer(*cmd_buf)?;
         }
         Ok(())
     }
 
-    fn submit_commands(&mut self, image_index: usize) -> RendererResult<()> {
-        self.update_command_buffer(image_index)?;
+    fn submit_commands<F: FnOnce(&mut Ui)>(
+        &mut self,
+        image_index: usize,
+        window: &Window,
+        ui_func: F,
+    ) -> RendererResult<()> {
+        self.update_command_buffer(image_index, window, ui_func)?;
         let cmd_buf = &self.command_buffers[image_index];
         let this_frame_data = &self.frame_data[self.current_image];
         let semaphores_available = [this_frame_data.image_available_semaphore];
@@ -542,7 +654,12 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render(&mut self, camera: &Camera) -> RendererResult<()> {
+    pub fn render<F: FnOnce(&mut Ui)>(
+        &mut self,
+        camera: &Camera,
+        window: &Window,
+        ui_func: F,
+    ) -> RendererResult<()> {
         self.wait_for_next_frame_fence()?;
         let image_index = self.swapchain.get_next_image(
             std::u64::MAX,
@@ -566,7 +683,7 @@ impl Renderer {
                 .free_queued(allo.deref_mut(), image_index);
         }
 
-        self.submit_commands(image_index as usize)?;
+        self.submit_commands(image_index as usize, window, ui_func)?;
 
         self.present(image_index)?;
         self.current_image = (self.current_image + 1) % FRAMES_IN_FLIGHT;
@@ -683,6 +800,7 @@ impl Renderer {
                 requirements: reqs,
                 location: MemoryLocation::GpuToCpu,
                 linear: false,
+                allocation_scheme: AllocationScheme::GpuAllocatorManaged,
             })?
         } else {
             panic!("No allocator!");
@@ -992,7 +1110,6 @@ impl Drop for Renderer {
                         guard.free_queued(allo, i);
                     }
                 }
-                allo.report_memory_leaks(log::Level::Warn);
                 log::logger().flush();
             }
         }

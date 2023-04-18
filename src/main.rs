@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let window_size = window.inner_size();
     let mut renderer = Renderer::new(
         "My Game Engine",
+        &window,
         window_size.width,
         window_size.height,
         internal_window,
@@ -259,201 +260,204 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         [1.0, 1.0, 1.0],
     )?;
     let start_time = std::time::SystemTime::now();
-    event_loop.run(move |event, _, controlflow| match event {
-        Event::WindowEvent {
-            event: WindowEvent::Resized(size),
-            ..
-        } => {
-            renderer
-                .recreate_swapchain(size.width, size.height)
-                .expect("Recreate Swapchain");
-            camera.set_aspect(size.width as f32 / size.height as f32);
-            renderer
-                .update_storage_from_lights(&lights)
-                .expect("light update");
-        }
-        Event::WindowEvent {
-            event: WindowEvent::CloseRequested,
-            ..
-        } => {
-            running = false;
-            *controlflow = winit::event_loop::ControlFlow::Exit;
-        }
-        Event::WindowEvent {
-            event:
-                WindowEvent::KeyboardInput {
-                    input:
-                        winit::event::KeyboardInput {
-                            state: pressed,
-                            virtual_keycode: Some(keycode),
-                            ..
-                        },
-                    ..
-                },
-            ..
-        } => match keycode {
-            winit::event::VirtualKeyCode::Space => {
-                move_up_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
+    event_loop.run(move |event, _, controlflow| {
+        renderer.handle_event(&window, &event);
+        match event {
+            Event::WindowEvent {
+                event: WindowEvent::Resized(size),
+                ..
+            } => {
+                renderer
+                    .recreate_swapchain(size.width, size.height)
+                    .expect("Recreate Swapchain");
+                camera.set_aspect(size.width as f32 / size.height as f32);
+                renderer
+                    .update_storage_from_lights(&lights)
+                    .expect("light update");
             }
-            winit::event::VirtualKeyCode::C => {
-                move_down_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::W => {
-                move_forward_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::S => {
-                move_backward_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::A => {
-                move_left_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::D => {
-                move_right_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::E => {
-                turn_right_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::Q => {
-                turn_left_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::R => {
-                turn_up_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::F => {
-                turn_down_pressed = match pressed {
-                    winit::event::ElementState::Pressed => true,
-                    winit::event::ElementState::Released => false,
-                };
-            }
-            winit::event::VirtualKeyCode::LShift => {
-                speed_factor = match pressed {
-                    winit::event::ElementState::Pressed => 2.0f32,
-                    winit::event::ElementState::Released => 1.0f32,
-                };
-            }
-            winit::event::VirtualKeyCode::F12 => {
-                if matches!(pressed, winit::event::ElementState::Pressed) {
-                    renderer.screenshot().expect("Could not take screenshot");
-                    info!("Screenshotted!");
-                }
-            }
-            winit::event::VirtualKeyCode::Escape => {
+            Event::WindowEvent {
+                event: WindowEvent::CloseRequested,
+                ..
+            } => {
                 running = false;
                 *controlflow = winit::event_loop::ControlFlow::Exit;
             }
-            _ => {}
-        },
-        Event::MainEventsCleared => {
-            // doing the work here (later)
-            window.request_redraw();
-        }
-        Event::RedrawRequested(_) => {
-            if !running {
-                return;
+            Event::WindowEvent {
+                event:
+                    WindowEvent::KeyboardInput {
+                        input:
+                            winit::event::KeyboardInput {
+                                state: pressed,
+                                virtual_keycode: Some(keycode),
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } => match keycode {
+                winit::event::VirtualKeyCode::Space => {
+                    move_up_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::C => {
+                    move_down_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::W => {
+                    move_forward_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::S => {
+                    move_backward_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::A => {
+                    move_left_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::D => {
+                    move_right_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::E => {
+                    turn_right_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::Q => {
+                    turn_left_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::R => {
+                    turn_up_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::F => {
+                    turn_down_pressed = match pressed {
+                        winit::event::ElementState::Pressed => true,
+                        winit::event::ElementState::Released => false,
+                    };
+                }
+                winit::event::VirtualKeyCode::LShift => {
+                    speed_factor = match pressed {
+                        winit::event::ElementState::Pressed => 2.0f32,
+                        winit::event::ElementState::Released => 1.0f32,
+                    };
+                }
+                winit::event::VirtualKeyCode::F12 => {
+                    if matches!(pressed, winit::event::ElementState::Pressed) {
+                        renderer.screenshot().expect("Could not take screenshot");
+                        info!("Screenshotted!");
+                    }
+                }
+                winit::event::VirtualKeyCode::Escape => {
+                    running = false;
+                    *controlflow = winit::event_loop::ControlFlow::Exit;
+                }
+                _ => {}
+            },
+            Event::MainEventsCleared => {
+                // doing the work here (later)
+                window.request_redraw();
             }
-            let temp = now;
-            now = std::time::SystemTime::now();
-            let diff = 1.0 / now.duration_since(temp).unwrap_or_default().as_secs_f32();
-            let text = format!("FPS: {:.02}", diff);
-            renderer
-                .remove_text(fps_id[0])
-                .expect("Could not remove old fps text");
-            fps_id = renderer
-                .add_text(
-                    &window,
-                    (0, 100),
-                    &[&fontdue::layout::TextStyle::new(&text, 20.0, 0)],
-                    [1.0, 1.0, 1.0],
-                )
-                .expect("Could not add fps text");
-            let move_speed: f32 = 0.05f32 * speed_factor;
-            let turn_speed: f32 = 0.005f32 * speed_factor;
-            if move_up_pressed {
-                camera.move_up(move_speed);
-            }
-            if move_down_pressed {
-                camera.move_down(move_speed);
-            }
-            if move_forward_pressed {
-                camera.move_forward(move_speed);
-            }
-            if move_backward_pressed {
-                camera.move_backward(move_speed);
-            }
-            if move_right_pressed {
-                camera.move_right(move_speed);
-            }
-            if move_left_pressed {
-                camera.move_left(move_speed);
-            }
-            if turn_up_pressed {
-                camera.turn_up(turn_speed);
-            }
-            if turn_down_pressed {
-                camera.turn_down(turn_speed);
-            }
-            if turn_right_pressed {
-                camera.turn_right(turn_speed);
-            }
-            if turn_left_pressed {
-                camera.turn_left(turn_speed);
-            }
-            {
-                if let Ok(mut allo) = renderer.allocator.lock() {
-                    let obj_ref = renderer
-                        .scene_tree
-                        .get_object_mut(car_handle, allo.deref_mut())
-                        .expect("Could not get car obj mut ref");
-                    obj_ref.object.position = glm::Vec3::new(
-                        car_base_position.x,
-                        car_base_position.y,
-                        car_base_position.z
-                            + start_time
-                                .elapsed()
-                                .expect("Could not get elapsed time")
-                                .as_secs_f32()
-                                .sin()
-                                * 5.0f32,
-                    );
+            Event::RedrawRequested(_) => {
+                if !running {
+                    return;
+                }
+                let temp = now;
+                now = std::time::SystemTime::now();
+                let diff = 1.0 / now.duration_since(temp).unwrap_or_default().as_secs_f32();
+                let text = format!("FPS: {:.02}", diff);
+                renderer
+                    .remove_text(fps_id[0])
+                    .expect("Could not remove old fps text");
+                fps_id = renderer
+                    .add_text(
+                        &window,
+                        (0, 100),
+                        &[&fontdue::layout::TextStyle::new(&text, 20.0, 0)],
+                        [1.0, 1.0, 1.0],
+                    )
+                    .expect("Could not add fps text");
+                let move_speed: f32 = 0.05f32 * speed_factor;
+                let turn_speed: f32 = 0.005f32 * speed_factor;
+                if move_up_pressed {
+                    camera.move_up(move_speed);
+                }
+                if move_down_pressed {
+                    camera.move_down(move_speed);
+                }
+                if move_forward_pressed {
+                    camera.move_forward(move_speed);
+                }
+                if move_backward_pressed {
+                    camera.move_backward(move_speed);
+                }
+                if move_right_pressed {
+                    camera.move_right(move_speed);
+                }
+                if move_left_pressed {
+                    camera.move_left(move_speed);
+                }
+                if turn_up_pressed {
+                    camera.turn_up(turn_speed);
+                }
+                if turn_down_pressed {
+                    camera.turn_down(turn_speed);
+                }
+                if turn_right_pressed {
+                    camera.turn_right(turn_speed);
+                }
+                if turn_left_pressed {
+                    camera.turn_left(turn_speed);
+                }
+                {
+                    if let Ok(mut allo) = renderer.allocator.lock() {
+                        let obj_ref = renderer
+                            .scene_tree
+                            .get_object_mut(car_handle, allo.deref_mut())
+                            .expect("Could not get car obj mut ref");
+                        obj_ref.object.position = glm::Vec3::new(
+                            car_base_position.x,
+                            car_base_position.y,
+                            car_base_position.z
+                                + start_time
+                                    .elapsed()
+                                    .expect("Could not get elapsed time")
+                                    .as_secs_f32()
+                                    .sin()
+                                    * 5.0f32,
+                        );
+                    }
+                }
+                let result = renderer.render(&camera, &window, |_| {});
+                match result {
+                    Ok(_) => {}
+                    Err(RendererError::VulkanError {
+                        source: ash::vk::Result::ERROR_OUT_OF_DATE_KHR,
+                        ..
+                    }) => {} // Resize request will update swapchain
+                    _ => result.expect("render error"),
                 }
             }
-            let result = renderer.render(&camera);
-            match result {
-                Ok(_) => {}
-                Err(RendererError::VulkanError {
-                    source: ash::vk::Result::ERROR_OUT_OF_DATE_KHR,
-                    ..
-                }) => {} // Resize request will update swapchain
-                _ => result.expect("render error"),
-            }
+            _ => {}
         }
-        _ => {}
     });
 }
