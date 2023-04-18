@@ -12,6 +12,7 @@ use gpu_allocator::MemoryLocation;
 use imgui::{Condition, Context, FontConfig, FontSource, Ui};
 use imgui_rs_vulkan_renderer::{Options, Renderer as ImguiRenderer};
 use imgui_winit_support::{HiDpiMode, WinitPlatform};
+use log::info;
 use nalgebra_glm as glm;
 
 pub mod buffer;
@@ -35,7 +36,7 @@ pub mod vertex;
 use buffer::Buffer;
 use camera::Camera;
 use swapchain::Swapchain;
-use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
+use winit::event::{ElementState, Event, VirtualKeyCode, WindowEvent};
 use winit::window::Window;
 
 use self::buffer::BufferManager;
@@ -415,7 +416,14 @@ impl Renderer {
                         ..
                     },
                 ..
-            } => self.ui_state.opened = true,
+            } => {
+                self.ui_state.opened ^= true;
+                if self.ui_state.opened {
+                    info!("Showing UI");
+                } else {
+                    info!("Hiding UI");
+                }
+            }
             _ => (),
         }
     }
@@ -591,15 +599,18 @@ impl Renderer {
                 .expect("Failed to prepare frame");
             let ui = self.imgui.frame();
 
-            let w = ui
-                .window("Vulkan Renderer")
-                .opened(&mut self.ui_state.opened)
-                .position([20.0, 20.0], Condition::Appearing)
-                .size([700.0, 80.0], Condition::Appearing)
-                .resizable(false);
-            w.build(|| {
-                ui.text("Hello, World!");
-            });
+            if self.ui_state.opened {
+                let w = ui
+                    .window("Vulkan Renderer")
+                    .opened(&mut self.ui_state.opened)
+                    .position([20.0, 20.0], Condition::FirstUseEver)
+                    .size([700.0, 80.0], Condition::FirstUseEver)
+                    .resizable(true)
+                    .movable(true);
+                w.build(|| {
+                    ui.text("Hello, World!");
+                });
+            }
 
             ui_func(ui);
 
