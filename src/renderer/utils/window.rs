@@ -93,7 +93,7 @@ pub fn create_render_window() -> Result<(EventLoop<()>, Window, InternalWindow),
     // Create window
     let event_loop = winit::event_loop::EventLoop::new();
     let window = winit::window::WindowBuilder::new()
-        .with_inner_size(PhysicalSize::new(800, 600))
+        .with_inner_size(PhysicalSize::new(1280, 720))
         .build(&event_loop)?;
 
     let internal_window = InternalWindow::new(&window);

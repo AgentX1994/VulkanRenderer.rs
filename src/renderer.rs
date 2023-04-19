@@ -77,6 +77,7 @@ impl Drop for FrameData {
 
 struct UiState {
     opened: bool,
+    show_demo_window: bool,
 }
 
 pub struct Renderer {
@@ -367,7 +368,10 @@ impl Renderer {
             allocator,
             context,
             imgui,
-            ui_state: UiState { opened: true },
+            ui_state: UiState {
+                opened: true,
+                show_demo_window: false,
+            },
             platform,
             imgui_renderer,
             buffer_manager,
@@ -604,12 +608,36 @@ impl Renderer {
                     .window("Vulkan Renderer")
                     .opened(&mut self.ui_state.opened)
                     .position([20.0, 20.0], Condition::FirstUseEver)
-                    .size([700.0, 80.0], Condition::FirstUseEver)
+                    .size([600.0, 400.0], Condition::FirstUseEver)
                     .resizable(true)
                     .movable(true);
                 w.build(|| {
-                    ui.text("Hello, World!");
+                    ui.checkbox("Show Demo Window", &mut self.ui_state.show_demo_window);
+                    if let Some(_tree_root) = ui.tree_node("Scene Objects") {
+                        for (i, object) in self.scene_tree.iter_mut().enumerate() {
+                            let name = format!("Object {i}");
+                            if let Some(_tree_node) = ui.tree_node(name) {
+                                ui.text(format!(
+                                    "Position: {} {} {}",
+                                    object.position.x, object.position.y, object.position.z
+                                ));
+
+                                let angles = glm::quat_euler_angles(&object.rotation);
+                                let (pitch, yaw, roll) = (angles.x, angles.y, angles.z);
+                                ui.text(format!("Rotation: {} {} {}", pitch, yaw, roll));
+
+                                ui.text(format!(
+                                    "Scaling: {} {} {}",
+                                    object.scaling.x, object.scaling.y, object.scaling.z
+                                ));
+                            };
+                        }
+                    };
                 });
+            }
+
+            if self.ui_state.show_demo_window {
+                ui.show_demo_window(&mut self.ui_state.show_demo_window);
             }
 
             ui_func(ui);
